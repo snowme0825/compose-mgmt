@@ -2884,112 +2884,112 @@ else:
                         st.success(f"✅ {selected_label} 데이터가 준비되었습니다. 다운로드 버튼을 눌러 저장하세요.")
                 except Exception as e:
                     st.error(f"❌ 개별 데이터 추출 중 오류 발생: {e}")
-        
-    # 15. 데이터 초기화
+# 15. 데이터 초기화
     elif admin_menu == "⚠️ 데이터 초기화":
-      st.subheader("⚠️ 시스템 데이터 초기화")
-      st.warning(
-          "🚨 **주의:** 데이터 초기화 작업은 삭제 후 복구할 수 없습니다. 필요한"
-          " 경우 실행 전 [📥 전체 데이터 엑셀/CSV 다운로드] 메뉴에서 백업"
-          " 데이터를 저장해 주세요."
-      )
+        st.subheader("⚠️ 시스템 데이터 초기화")
+        st.warning(
+            "🚨 **주의:** 데이터 초기화 작업은 삭제 후 복구할 수 없습니다. 필요한"
+            " 경우 실행 전 [📥 전체 데이터 엑셀/CSV 다운로드] 메뉴에서 백업"
+            " 데이터를 저장해 주세요."
+        )
 
-      reset_type = st.radio(
-          "초기화할 대상을 선택하세요",
-          [
-              "📊 매출 및 발주 내역만 초기화 (daily_sales, mfood_orders)",
-              (
-                  "⏰ 출퇴근 및 스케줄/대타 내역만 초기화 (attendance, schedule,"
-                  " shift_requests)"
-              ),
-              "🤝 인수인계 기록만 초기화 (handover)",
-              "📦 재고 및 폐기 내역만 초기화 (inventory, waste)",
-              "📋 체크리스트 수행 기록만 초기화 (checklist_log)",
-              (
-                  "🚨 전체 시스템 초기화 (모든 데이터 삭제 후 기본 세팅 상태로"
-                  " 리셋)"
-              ),
-          ],
-      )
+        reset_type = st.radio(
+            "초기화할 대상을 선택하세요",
+            [
+                "📊 매출 및 발주 내역만 초기화 (daily_sales, mfood_orders)",
+                (
+                    "⏰ 출퇴근 및 스케줄/대타 내역만 초기화 (attendance, schedule,"
+                    " shift_requests)"
+                ),
+                "🤝 인수인계 기록만 초기화 (handover)",
+                "📦 재고 및 폐기 내역만 초기화 (inventory, waste)",
+                "📋 체크리스트 수행 기록만 초기화 (checklist_log)",
+                (
+                    "🚨 전체 시스템 초기화 (직원 목록, 마스터 설정을 포함한 모든 데이터 삭제)"
+                ),
+            ],
+        )
 
-      st.write("---")
-      st.markdown("#### 🔒 초기화 실행 확인")
-      confirm_input = st.text_input(
-          "실수 방지를 위해 아래에 **'초기화'** 라고 정확히 입력하세요."
-      )
-      confirm_checkbox = st.checkbox(
-          "데이터를 삭제하며, 복구가 불가능함에 동의합니다."
-      )
+        st.write("---")
+        st.markdown("#### 🔒 초기화 실행 확인")
+        confirm_input = st.text_input(
+            "실수 방지를 위해 아래에 **'초기화'** 라고 정확히 입력하세요."
+        )
+        confirm_checkbox = st.checkbox(
+            "데이터를 삭제하며, 복구가 불가능함에 동의합니다."
+        )
 
-      if st.button("🔥 데이터 초기화 실행", type="primary"):
-        if confirm_input.strip() == "초기화" and confirm_checkbox:
-          try:
-            if reset_type.startswith("📊"):
-              supabase.table("daily_sales").delete().not_.is_(
-                  "date", "null"
-              ).execute()
-              supabase.table("mfood_orders").delete().not_.is_(
-                  "year_month", "null"
-              ).execute()
-            elif reset_type.startswith("⏰"):
-              supabase.table("attendance").delete().not_.is_(
-                  "id", "null"
-              ).execute()
-              supabase.table("schedule").delete().not_.is_(
-                  "date", "null"
-              ).execute()
-              supabase.table("shift_requests").delete().not_.is_(
-                  "id", "null"
-              ).execute()
-            elif reset_type.startswith("🤝"):
-              supabase.table("handover").delete().not_.is_(
-                  "id", "null"
-              ).execute()
-            elif reset_type.startswith("📦"):
-              supabase.table("inventory").delete().not_.is_(
-                  "item_name", "null"
-              ).execute()
-              supabase.table("waste").delete().not_.is_("id", "null").execute()
-            elif reset_type.startswith("📋"):
-              supabase.table("checklist_log").delete().not_.is_(
-                  "id", "null"
-              ).execute()
-            elif reset_type.startswith("🚨"):
-              tables = [
-                  "daily_sales",
-                  "mfood_orders",
-                  "attendance",
-                  "schedule",
-                  "inventory",
-                  "waste",
-                  "shift_requests",
-                  "checklist_log",
-                  "handover",
-              ]
-              for t in tables:
-                if t in ["daily_sales", "schedule"]:
-                  supabase.table(t).delete().not_.is_("date", "null").execute()
-                elif t == "mfood_orders":
-                  supabase.table(t).delete().not_.is_(
-                      "year_month", "null"
-                  ).execute()
-                elif t == "inventory":
-                  supabase.table(t).delete().not_.is_(
-                      "item_name", "null"
-                  ).execute()
-                else:
-                  supabase.table(t).delete().not_.is_("id", "null").execute()
-            st.success(
-                "✅ 선택한 대상의 데이터가 성공적으로 초기화되었습니다."
-            )
-            st.rerun()
-          except Exception as e:
-            st.error(f"❌ 초기화 실패 (DB 권한 또는 오류 확인): {e}")
-        else:
-          st.error(
-              "❌ '초기화' 문구 입력과 동의 체크박스를 모두 확인해 주세요."
-          )
- # ⚙️ 메뉴 & 항목 설정 관리 (전체 세부 항목 커스텀 + 배달 수수료율 포함)
+        if st.button("🔥 데이터 초기화 실행", type="primary"):
+            if confirm_input.strip() == "초기화" and confirm_checkbox:
+                try:
+                    if reset_type.startswith("📊"):
+                        supabase.table("daily_sales").delete().not_.is_(
+                            "date", "null"
+                        ).execute()
+                        supabase.table("mfood_orders").delete().not_.is_(
+                            "year_month", "null"
+                        ).execute()
+                    elif reset_type.startswith("⏰"):
+                        supabase.table("attendance").delete().not_.is_(
+                            "id", "null"
+                        ).execute()
+                        supabase.table("schedule").delete().not_.is_(
+                            "date", "null"
+                        ).execute()
+                        supabase.table("shift_requests").delete().not_.is_(
+                            "id", "null"
+                        ).execute()
+                    elif reset_type.startswith("🤝"):
+                        supabase.table("handover").delete().not_.is_(
+                            "id", "null"
+                        ).execute()
+                    elif reset_type.startswith("📦"):
+                        supabase.table("inventory").delete().not_.is_(
+                            "item_name", "null"
+                        ).execute()
+                        supabase.table("waste").delete().not_.is_("id", "null").execute()
+                    elif reset_type.startswith("📋"):
+                        supabase.table("checklist_log").delete().not_.is_(
+                            "id", "null"
+                        ).execute()
+                    elif reset_type.startswith("🚨"):
+                        tables = [
+                            "daily_sales",
+                            "mfood_orders",
+                            "attendance",
+                            "schedule",
+                            "inventory",
+                            "waste",
+                            "shift_requests",
+                            "checklist_log",
+                            "handover",
+                            "staff",
+                            "checklist",
+                        ]
+                        for t in tables:
+                            if t in ["daily_sales", "schedule"]:
+                                supabase.table(t).delete().not_.is_("date", "null").execute()
+                            elif t == "mfood_orders":
+                                supabase.table(t).delete().not_.is_(
+                                    "year_month", "null"
+                                ).execute()
+                            elif t == "inventory":
+                                supabase.table(t).delete().not_.is_(
+                                    "item_name", "null"
+                                ).execute()
+                            else:
+                                supabase.table(t).delete().not_.is_("id", "null").execute()
+                    st.success(
+                        "✅ 선택한 대상의 데이터가 성공적으로 초기화되었습니다."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 초기화 실패 (DB 권한 또는 오류 확인): {e}")
+            else:
+                st.error(
+                    "❌ '초기화' 문구 입력과 동의 체크박스를 모두 확인해 주세요."
+                )        
+     # ⚙️ 메뉴 & 항목 설정 관리 (전체 세부 항목 커스텀 + 배달 수수료율 포함)
     elif admin_menu == "⚙️ 메뉴 & 항목 설정 관리":
         st.subheader("⚙️ 점주 메뉴 및 세부 항목 커스텀 설정")
         st.caption("사이드바 메뉴, 배달 플랫폼 수수료, 지출 카테고리, 재고, 폐기 사유 등 모든 항목을 직접 관리하세요.")
