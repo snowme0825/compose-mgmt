@@ -2125,122 +2125,107 @@ else:
       else:
         st.info("등록된 인수인계 기록이 없습니다.")
 
-    # 6.[점주] 원자재 재고 현황 & 단가 관리# --------------------------------------------------
-    # 점주 메뉴: 📦 재고 현황 & 원가 관리 (알바생 실사 완벽 연동)
-    # --------------------------------------------------
-    elif admin_menu == "📦 재고 현황 & 원가 관리":
-        st.subheader("📦 재고 현황 및 실사 이력 관리")
-        st.caption("현재 전산 재고 수량을 관리하고, 알바생이 점검한 실사 기록 및 오차를 실시간으로 확인합니다.")
+    # 6. 원자재 폐기 이력 & 손실 점검
+    elif admin_menu == "🗑️ 원자재 폐기 이력 & 손실 점검":
+        st.subheader("🗑️ 원자재 폐기 이력 & 손실 점검")
+        st.info("💡 알바생 모드에서 등록된 유통기한/파손 폐기 내역 및 재고 실사 오차 손실액을 집계합니다.")
 
-        tab_inv1, tab_inv2 = st.tabs(["📋 현재 재고 현황 및 단가 수정", "📜 알바생 실사 점검 이력"])
+        # 1. 데이터 불러오기
+        try:
+            waste_res = supabase.table("waste").select("*").execute()
+            waste_df = pd.DataFrame(waste_res.data) if waste_res.data else pd.DataFrame()
+        except Exception:
+            waste_df = pd.DataFrame()
 
-        # --------------------------------------------------
-        # 탭 1: 현재 재고 현황 및 단가 관리
-        # --------------------------------------------------
-        with tab_inv1:
-            st.write("#### 📋 현재 매장 전산 재고 목록")
+        # 실사 로그 데이터 불러오기 (테이블 존재 여부 체크)
+        inv_log_df = pd.DataFrame()
+        for log_t in ["inventory_log", "inventory_logs", "stock_check"]:
             try:
-                inv_res = supabase.table("inventory").select("*").order("item_name").execute()
-                inv_data = inv_res.data if inv_res else []
-            except Exception as e:
-                st.error(f"❌ 재고 목록 불러오기 실패: {e}")
-                inv_data = []
+                log_res = supabase.table(log_t).select("*").execute()
+                if log_res.data:
+                    inv_log_df = pd.DataFrame(log_res.data)
+                    break
+            except Exception:
+                continue
 
-            if inv_data:
-                df_inv = pd.DataFrame(inv_data)
+        # 2. 상단 요약 KPI 지표
+        col1, col2, col3 = st.columns(3)
+        
+        total_waste_cost = 0
+        total_waste_cnt = 0
+        
+        if not waste_df.empty and "cost" in waste_df.columns:
+            total_waste_cost = pd.to_numeric(waste_df["cost"], errors="coerce").sum()
+            total_waste_cnt = len(waste_df)
+
+        audit_loss_cost = 0
+        if not inv_log_df.empty and "loss_cost" in inv_log_df.columns:
+            audit_loss_cost = pd.to_numeric(inv_log_df["loss_cost"], errors="coerce").sum()
+
+        with col1:
+            st.metric("총 폐기 손실액", f"{int(total_waste_cost):,} 원")
+        with col2:
+            st.metric("총 폐기 등록 건수", f"{total_waste_cnt:,} 건")
+        with col3:
+            st.metric("실사 오차 총 손실액", f"{int(audit_loss_cost):,} 원")
+
+        st.write("---")
+
+        # 3. 상세 내역 탭 분리 (폐기 이력 / 실사 손실 이력)
+        tab1, tab2 = st.tabs(["📋 폐기 보고 내역", "🔍 재고 실사 손실 내역"])
+
+        with tab1:
+            st.markdown("#### 🚨 알바생 폐기 보고 내역")
+            if not waste_df.empty:
+                # 필요한 컬럼 정렬 및 이름 변경
+                show_cols = [c for c in ["date", "item_name", "qty", "cost", "reason", "worker"] if c in waste_df.columns]
+                display_df = waste_df[show_cols].copy()
                 
-                disp_inv = df_inv[["item_name", "current_qty", "unit", "cost_price"]].copy()
-                disp_inv.columns = ["품목명", "현재 수량", "단위", "단가(원)"]
-
-                edited_inv_df = st.data_editor(
-                    disp_inv,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "현재 수량": st.column_config.NumberColumn("현재 수량", min_value=0, step=1),
-                        "단가(원)": st.column_config.NumberColumn("단가(원)", min_value=0, step=10, format="%d 원"),
-                    },
-                    key="inventory_editor"
-                )
-
-                if st.button("💾 재고 및 단가 수정사항 저장", type="primary", key="save_inv_master"):
-                    try:
-                        for _, row in edited_inv_df.iterrows():
-                            supabase.table("inventory").upsert({
-                                "item_name": row["품목명"],
-                                "current_qty": safe_int(row["현재 수량"]),
-                                "cost_price": safe_int(row["단가(원)"]),
-                                "unit": row["단위"]
-                            }, on_conflict="item_name").execute()
-                        st.success("✅ 재고 수량 및 단가가 성공적으로 업데이트되었습니다!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 저장 중 오류 발생: {e}")
-            else:
-                st.info("💡 등록된 재고가 없습니다. [⚙️ 메뉴 & 항목 설정 관리]에서 재고 품목을 설정해 주세요.")
-
-        # --------------------------------------------------
-        # 탭 2: 알바생 실사 점검 이력 (실시간 연동)
-        # --------------------------------------------------
-        with tab_inv2:
-            st.write("#### 📜 알바생 재고 실사 점검 내역")
-            
-            col_a1, col_a2 = st.columns(2)
-            audit_start = col_a1.date_input("조회 시작일", datetime.datetime.now(KST).date() - datetime.timedelta(days=14), key="audit_start_dt")
-            audit_end = col_a2.date_input("조회 종료일", datetime.datetime.now(KST).date(), key="audit_end_dt")
-
-            try:
-                audit_res = (
-                    supabase.table("inventory_audit")
-                    .select("*")
-                    .gte("date", audit_start.strftime("%Y-%m-%d"))
-                    .lte("date", audit_end.strftime("%Y-%m-%d"))
-                    .order("created_at", desc=True)
-                    .execute()
-                )
-                audit_data = audit_res.data if audit_res else []
-            except Exception as e:
-                st.error(f"❌ 실사 이력을 불러오는 중 오류 발생: {e}")
-                audit_data = []
-
-            if audit_data:
-                df_audit = pd.DataFrame(audit_data)
-
-                df_audit["system_qty"] = df_audit["system_qty"].apply(safe_int)
-                df_audit["actual_qty"] = df_audit["actual_qty"].apply(safe_int)
-                df_audit["diff_qty"] = df_audit["diff_qty"].apply(safe_int)
-
-                total_audits = len(df_audit)
-                diff_count = len(df_audit[df_audit["diff_qty"] != 0])
-
-                m1, m2 = st.columns(2)
-                m1.metric("📋 기간 내 총 실사 건수", f"{total_audits:,} 건")
-                m2.metric("⚠️ 수량 오차 발생 건수", f"{diff_count:,} 건", delta_color="inverse")
-
-                st.divider()
-
-                disp_audit = df_audit[[
-                    "date", "item_name", "system_qty", "actual_qty", "diff_qty", "unit", "checked_by", "memo", "created_at"
-                ]].copy()
-                disp_audit.columns = [
-                    "점검일자", "품목명", "전산재고", "실사수량", "오차수량", "단위", "점검자", "메모/특이사항", "등록일시"
-                ]
+                # 날짜 내림차순 정렬
+                if "date" in display_df.columns:
+                    display_df = display_df.sort_values(by="date", ascending=False)
 
                 st.dataframe(
-                    disp_audit,
-                    use_container_width=True,
-                    hide_index=True,
+                    display_df,
                     column_config={
-                        "오차수량": st.column_config.NumberColumn(
-                            "오차수량",
-                            help="실사수량 - 전산재고 (음수일 경우 부족)",
-                            format="%d"
-                        )
-                    }
+                        "date": "등록 일자",
+                        "item_name": "품목명",
+                        "qty": "폐기 수량",
+                        "cost": st.column_config.NumberColumn("손실 금액", format="%d 원"),
+                        "reason": "폐기 사유",
+                        "worker": "작성자/알바생",
+                    },
+                    use_container_width=True,
+                    hide_index=True
                 )
             else:
-                st.info(f"ℹ️ {audit_start} ~ {audit_end} 기간 내에 등록된 알바생 실사 이력이 없습니다.")
-        
+                st.info("등록된 폐기 내역이 없습니다.")
+
+        with tab2:
+            st.markdown("#### 📦 재고 실사 수량 오차 & 손실액")
+            if not inv_log_df.empty:
+                show_cols_inv = [c for c in ["date", "item_name", "system_qty", "actual_qty", "diff_qty", "loss_cost", "worker"] if c in inv_log_df.columns]
+                display_inv_df = inv_log_df[show_cols_inv].copy()
+
+                if "date" in display_inv_df.columns:
+                    display_inv_df = display_inv_df.sort_values(by="date", ascending=False)
+
+                st.dataframe(
+                    display_inv_df,
+                    column_config={
+                        "date": "실사 일자",
+                        "item_name": "품목명",
+                        "system_qty": "전산 수량",
+                        "actual_qty": "실물 수량",
+                        "diff_qty": "오차 수량",
+                        "loss_cost": st.column_config.NumberColumn("손실 금액", format="%d 원"),
+                        "worker": "점검자",
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("등록된 재고 실사 기록이 없습니다.")
    # 7. [점주] 오픈/마감 체크리스트 관리 (내역 조회 & 항목 관리)
     elif "체크리스트" in admin_menu:
         st.subheader("📋 오픈/마감 체크리스트 관리 (점주 전용)")
@@ -2524,120 +2509,138 @@ else:
             else:
                 st.info("💡 이번 달 등록된 스케줄이 없습니다.")
     
-     # 9. 재고 현황 & 원가 관리
-    elif "원자재" in admin_menu or "재고" in admin_menu:
-        st.subheader("📦 원자재 재고 현황 & 단가 관리")
-        st.caption("💡 원자재 품목, 단가, 기준 재고를 관리하고 알바생이 입력한 실사 수량을 실시간 확인합니다.")
+     # 9. 재고현황 및 원가 관리
+    elif admin_menu == "📦 재고 현황 & 원가 관리":
+        st.subheader("📦 재고 현황 & 원가 관리")
+        st.info(
+            "💡 등록된 품목의 현재 재고 수량과 원가 가치를 실시간으로 확인합니다."
+            " (신규 품목 등록/수정은 [⚙️ 설정 관리] 메뉴의 재고 탭을 이용해 주세요)"
+        )
 
-        tab_inv1, tab_inv2, tab_inv3 = st.tabs(["📊 재고 및 단가 현황", "➕ 품목 등록 및 수정", "📜 알바생 실사 이력"])
+        # 1. Supabase 재고 데이터 안전 불러오기
+        inv_data = []
+        try:
+            inv_res = supabase.table("inventory").select("*").execute()
+            if inv_res and hasattr(inv_res, "data") and inv_res.data:
+                inv_data = inv_res.data
+        except Exception as e:
+            st.error(f"❌ DB 연동 오류 (inventory 테이블 확인 필요): {e}")
 
-        with tab_inv1:
-            try:
-                inv_res = supabase.table("inventory").select("*").order("item_name").execute()
-                inv_data = inv_res.data if inv_res and inv_res.data else []
-                df_inv = pd.DataFrame(inv_data) if inv_data else pd.DataFrame()
+        # Dataframe 변환 및 검증
+        if inv_data:
+            inv_df = pd.DataFrame(inv_data)
 
-                if not df_inv.empty:
-                    df_inv["cost_price"] = df_inv["cost_price"].fillna(0).astype(int)
-                    df_inv["current_qty"] = df_inv["current_qty"].fillna(0).astype(int)
-                    df_inv["total_asset"] = df_inv["current_qty"] * df_inv["cost_price"]
+            # 필수 컬럼 존재 여부 체크 및 기본값 채우기
+            required_cols = {
+                "category": "기타",
+                "item_name": "미지정 품목",
+                "unit": "개",
+                "unit_price": 0,
+                "current_qty": 0,
+                "safety_qty": 0,
+            }
+            for col, default_val in required_cols.items():
+                if col not in inv_df.columns:
+                    inv_df[col] = default_val
 
-                    total_inv_value = safe_int(df_inv["total_asset"].sum()) if "safe_int" in globals() else int(df_inv["total_asset"].sum())
+            # 수력형 데이터 타입 정형화 및 평가액 계산
+            inv_df["current_qty"] = pd.to_numeric(
+                inv_df["current_qty"], errors="coerce"
+            ).fillna(0)
+            inv_df["unit_price"] = pd.to_numeric(
+                inv_df["unit_price"], errors="coerce"
+            ).fillna(0)
+            inv_df["safety_qty"] = pd.to_numeric(
+                inv_df["safety_qty"], errors="coerce"
+            ).fillna(0)
+            inv_df["total_val"] = inv_df["current_qty"] * inv_df["unit_price"]
 
-                    col_m1, col_m2 = st.columns(2)
-                    col_m1.metric("📦 총 원자재 품목 수", f"{len(df_inv)} 개")
-                    col_m2.metric("💵 총 재고 자산 추정액", f"{total_inv_value:,} 원")
-
-                    st.write("---")
-
-                    column_mapping = {
-                        "item_name": "품목명",
-                        "current_qty": "현재 재고",
-                        "unit": "단위",
-                        "cost_price": "단가(원)",
-                        "total_asset": "재고 금액(원)"
-                    }
-                    df_display = df_inv.rename(columns={k: v for k, v in column_mapping.items() if k in df_inv.columns})
-                    display_cols = [c for c in ["품목명", "현재 재고", "단위", "단가(원)", "재고 금액(원)"] if c in df_display.columns]
-
-                    st.dataframe(
-                        df_display[display_cols],
-                        column_config={
-                            "현재 재고": st.column_config.NumberColumn(format="%,d"),
-                            "단가(원)": st.column_config.NumberColumn(format="%,d 원"),
-                            "재고 금액(원)": st.column_config.NumberColumn(format="%,d 원"),
-                        },
-                        use_container_width=True
-                    )
-                else:
-                    st.info("💡 등록된 원자재 품목이 없습니다. [➕ 품목 등록 및 수정] 탭에서 품목을 추가해 주세요.")
-            except Exception as e:
-                st.error(f"❌ 데이터베이스 오류: Supabase 'inventory' 테이블을 확인해 주세요. ({e})")
-
-        with tab_inv2:
-            st.write("#### ➕ 신규 원자재 품목 등록")
-            col_add1, col_add2, col_add3, col_add4 = st.columns([2, 1, 1, 1])
-            new_item_name = col_add1.text_input("품목명", placeholder="예: 원두(1kg)", key="admin_inv_name")
-            new_unit = col_add2.text_input("단위", value="개", key="admin_inv_unit")
-            new_cost = col_add3.number_input("단가(원)", min_value=0, step=100, key="admin_inv_cost")
-            new_qty = col_add4.number_input("초기 수량", min_value=0, step=1, key="admin_inv_qty")
-
-            if st.button("💾 품목 등록", type="primary", use_container_width=True):
-                if not new_item_name.strip():
-                    st.warning("⚠️ 품목명을 입력해 주세요.")
-                else:
-                    try:
-                        supabase.table("inventory").upsert({
-                            "item_name": new_item_name.strip(),
-                            "unit": new_unit.strip(),
-                            "cost_price": new_cost,
-                            "current_qty": new_qty
-                        }, on_conflict="item_name").execute()
-                        st.success(f"✅ '{new_item_name}' 품목이 등록/수정 되었습니다.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 저장 중 오류 발생: {e}")
+            # 2. 상단 KPI 요약
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("총 재고 품목 수", f"{len(inv_df):,} 개")
+            with col2:
+                st.metric(
+                    "총 재고 자산 가치",
+                    f"{int(inv_df['total_val'].sum()):,} 원",
+                )
+            with col3:
+                low_stock_cnt = len(
+                    inv_df[inv_df["current_qty"] < inv_df["safety_qty"]]
+                )
+                st.metric(
+                    "안전재고 부족 품목",
+                    f"{low_stock_cnt:,} 개",
+                    delta=-low_stock_cnt if low_stock_cnt > 0 else 0,
+                    delta_color="inverse",
+                )
 
             st.write("---")
-            st.write("#### 🗑️ 기존 품목 삭제")
-            try:
-                inv_res_del = supabase.table("inventory").select("item_name").execute()
-                del_items = [r["item_name"] for r in inv_res_del.data] if inv_res_del.data else []
 
-                if del_items:
-                    target_del = st.selectbox("삭제할 품목 선택", del_items, key="admin_del_inv_select")
-                    if st.button("❌ 품목 삭제", type="secondary"):
-                        supabase.table("inventory").delete().eq("item_name", target_del).execute()
-                        st.success(f"🗑️ '{target_del}' 품목이 삭제되었습니다.")
-                        st.rerun()
-            except Exception:
-                pass
+            # 3. 카테고리 필터링 및 데이터 표 출력
+            cat_list = ["전체"] + [
+                str(c) for c in inv_df["category"].unique() if c
+            ]
+            selected_cat = st.selectbox("카테고리 필터", cat_list)
 
-        with tab_inv3:
-            st.write("#### 📜 실시간 재고 실사 변경 로그")
-            try:
-                log_res = supabase.table("inventory_log").select("*").order("timestamp", desc=True).limit(50).execute()
-                log_data = log_res.data if log_res and log_res.data else []
-                df_log = pd.DataFrame(log_data) if log_data else pd.DataFrame()
+            filtered_df = inv_df.copy()
+            if selected_cat != "전체":
+                filtered_df = filtered_df[
+                    filtered_df["category"] == selected_cat
+                ]
 
-                if not df_log.empty:
-                    log_mapping = {
-                        "timestamp": "점검 일시",
-                        "item_name": "품목명",
-                        "old_qty": "기존 수량",
-                        "new_qty": "변경 수량",
-                        "checked_by": "점검자(알바생)"
-                    }
-                    df_log_display = df_log.rename(columns={k: v for k, v in log_mapping.items() if k in df_log.columns})
-                    log_cols = [c for c in ["점검 일시", "품목명", "기존 수량", "변경 수량", "점검자(알바생)"] if c in df_log_display.columns]
+            st.markdown("#### 📊 현재 재고 및 자산 현황")
 
-                    st.dataframe(df_log_display[log_cols], use_container_width=True)
-                else:
-                    st.info("💡 아직 기록된 재고 실사 이력이 없습니다.")
-            except Exception:
-                st.info("💡 'inventory_log' 테이블이 비어있거나 생성이 필요합니다.")
+            display_cols = [
+                "category",
+                "item_name",
+                "unit",
+                "unit_price",
+                "current_qty",
+                "safety_qty",
+                "total_val",
+            ]
 
-    # 10. 전체 인건비 정산
+            st.dataframe(
+                filtered_df[display_cols],
+                column_config={
+                    "category": "카테고리",
+                    "item_name": "품목명",
+                    "unit": "단위",
+                    "unit_price": st.column_config.NumberColumn(
+                        "단가", format="%d 원"
+                    ),
+                    "current_qty": st.column_config.NumberColumn(
+                        "현재 수량", format="%.1f"
+                    ),
+                    "safety_qty": st.column_config.NumberColumn(
+                        "안전 재고", format="%.1f"
+                    ),
+                    "total_val": st.column_config.NumberColumn(
+                        "재고 평가액", format="%d 원"
+                    ),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # 안전재고 부족 알림
+            low_items = filtered_df[
+                filtered_df["current_qty"] < filtered_df["safety_qty"]
+            ]
+            if not low_items.empty:
+                st.warning(
+                    "🚨 **안전재고 부족 경고**: 다음 품목의 재고가 부족합니다 ->"
+                    f" {', '.join(low_items['item_name'].tolist())}"
+                )
+
+        else:
+            st.warning("📦 현재 DB에 등록된 재고 품목 데이터가 없습니다.")
+            st.info(
+                "👉 **[⚙️ 설정 관리] -> [📦 재고 관리 품목 설정]** 메뉴에서"
+                " 품목을 신규 등록해 주시면 이곳에 자동으로 표시됩니다!"
+            )
+        # 10. 전체 인건비 정산
     elif admin_menu == "💰 전체 인건비 정산":
       st.subheader("💰 당월 직원별 전체 인건비 정산")
 
@@ -3113,20 +3116,98 @@ else:
                         st.error(f"❌ 저장 중 오류 발생: {e}")
 
         # --------------------------------------------------
-        # 탭 4: 재고 품목 관리
-        # --------------------------------------------------
-        with tab4:
-            st.write("#### 📦 재고 관리 품목 설정")
-            inv_res = supabase.table("app_settings").select("value").eq("key", "inventory_items").execute()
-            current_inv = inv_res.data[0]["value"] if inv_res.data else ["원두 (kg)", "우유 (팩)", "빨대 (박스)", "24oz 컵 (박스)", "바닐라 시럽 (병)"]
+            # 탭 4: 재고 품목 관리
+            # --------------------------------------------------
+            with tab4:
+                st.write("#### 📦 재고 관리 품목 설정")
+                st.caption("매장에서 사용하는 재고 품목을 등록, 수정 및 삭제합니다.")
 
-            edited_inv_text = st.text_area("재고 점검 품목 목록 (줄바꿈 구분)", value="\n".join(current_inv), height=200, key="inv_tab_area")
+                # 1. 신규 품목 등록
+                with st.expander("➕ 신규 재고 품목 등록", expanded=False):
+                    with st.form("add_inv_item_form", clear_on_submit=True):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            new_item_name = st.text_input("품목명 (예: 우유 1L)")
+                            new_category = st.selectbox(
+                                "카테고리",
+                                [
+                                    "원두/음료",
+                                    "유제품",
+                                    "시럽/소스",
+                                    "디저트/베이커리",
+                                    "용기/부자재",
+                                    "기타",
+                                ],
+                            )
+                        with col2:
+                            new_unit = st.text_input("단위 (예: 개, 팩, kg, 박스)", value="개")
+                            new_unit_price = st.number_input("단가 (원)", min_value=0, step=100)
+                        with col3:
+                            new_stock_qty = st.number_input("초기 수량", min_value=0.0, step=1.0)
+                            new_safety_qty = st.number_input("안전 재고 수량", min_value=0.0, step=1.0)
 
-            if st.button("💾 재고 품목 저장", type="primary", key="save_inv_btn"):
-                new_inv_list = [i.strip() for i in edited_inv_text.split("\n") if i.strip()]
-                supabase.table("app_settings").upsert({"key": "inventory_items", "value": new_inv_list}).execute()
-                st.success("✅ 재고 품목 목록이 업데이트되었습니다!")
-                st.rerun()
+                        submit_add = st.form_submit_button("💾 품목 저장", type="primary", use_container_width=True)
+
+                        if submit_add:
+                            if not new_item_name.strip():
+                                st.error("❌ 품목명을 입력해 주세요.")
+                            else:
+                                try:
+                                    data = {
+                                        "item_name": new_item_name.strip(),
+                                        "category": new_category,
+                                        "unit": new_unit.strip(),
+                                        "unit_price": new_unit_price,
+                                        "current_qty": new_stock_qty,
+                                        "safety_qty": new_safety_qty,
+                                    }
+                                    supabase.table("inventory").insert(data).execute()
+                                    st.success(f"✅ '{new_item_name}' 품목이 성공적으로 등록되었습니다.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ 등록 실패: {e}")
+
+                st.write("---")
+
+                # 2. 등록된 품목 목록 및 삭제
+                try:
+                    inv_res = supabase.table("inventory").select("*").execute()
+                    inv_df = pd.DataFrame(inv_res.data) if inv_res.data else pd.DataFrame()
+                except Exception:
+                    inv_df = pd.DataFrame()
+
+                if not inv_df.empty:
+                    st.write("#### 📋 등록된 재고 품목 목록")
+                    show_cols = [c for c in ["item_name", "category", "unit", "unit_price", "safety_qty"] if c in inv_df.columns]
+                    
+                    st.dataframe(
+                        inv_df[show_cols],
+                        column_config={
+                            "item_name": "품목명",
+                            "category": "카테고리",
+                            "unit": "단위",
+                            "unit_price": st.column_config.NumberColumn("단가", format="%d 원"),
+                            "safety_qty": st.column_config.NumberColumn("안전재고", format="%.1f"),
+                        },
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    col_del1, col_del2 = st.columns([3, 1])
+                    with col_del1:
+                        del_target = st.selectbox("삭제할 품목 선택", options=inv_df["item_name"].tolist(), key="del_inv_select")
+                    with col_del2:
+                        st.write("")
+                        st.write("")
+                        if st.button("🗑️ 품목 삭제", use_container_width=True, key="del_inv_btn"):
+                            try:
+                                supabase.table("inventory").delete().eq("item_name", del_target).execute()
+                                st.success(f"✅ '{del_target}' 삭제 완료")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 삭제 실패: {e}")
+                else:
+                    st.info("등록된 재고 품목이 없습니다. 상단 폼에서 신규 품목을 등록해 주세요.")
 
         # --------------------------------------------------
         # 탭 5: 원자재 폐기 사유 및 품목 관리
