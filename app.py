@@ -2725,7 +2725,7 @@ else:
                 else:
                     st.info("등록된 재고 실사 기록이 없습니다.")
 
-        # =========================================================================
+                 # =========================================================================
         # 8. 오픈/마감 체크리스트 관리
         # =========================================================================
         elif "체크리스트" in admin_menu:
@@ -2736,7 +2736,9 @@ else:
             with tab_history:
                 st.write("#### 📅 알바생 점검 완료 내역")
 
-                selected_shift = st.radio("조회할 근무 파트 선택", ["☀️ 오픈", "🌙 마감"], horizontal=True, key="admin_chk_view_shift")
+                col_view1, col_view2 = st.columns([2, 2])
+                with col_view1:
+                    selected_shift = st.radio("조회할 근무 파트 선택", ["☀️ 오픈", "🌙 마감"], horizontal=True, key="admin_chk_view_shift")
 
                 setting_key = "checklist_open_items" if "오픈" in selected_shift else "checklist_close_items"
                 default_items = (
@@ -2755,9 +2757,25 @@ else:
                     )
                     chk_list = chk_res.data if chk_res and getattr(chk_res, "data", None) else []
 
+                    # DB 데이터에서 월(YYYY-MM) 목록 추출
+                    ym_set = set()
+                    for r in chk_list:
+                        d_str = str(r.get("date", ""))
+                        if len(d_str) >= 7:
+                            ym_set.add(d_str[:7])
+                    available_yms = sorted(list(ym_set), reverse=True)
+
+                    with col_view2:
+                        if available_yms:
+                            selected_ym = st.selectbox("📅 조회할 월 선택", available_yms, key="admin_chk_ym_select")
+                        else:
+                            selected_ym = None
+
+                    # 근무 파트 및 선택한 월 기준 데이터 필터링
                     filtered_list = [
                         r for r in chk_list 
-                        if r.get("shift_type") == selected_shift or selected_shift in str(r.get("shift_type", ""))
+                        if (r.get("shift_type") == selected_shift or selected_shift in str(r.get("shift_type", "")))
+                        and (not selected_ym or str(r.get("date", ""))[:7] == selected_ym)
                     ]
 
                     if filtered_list:
@@ -2782,8 +2800,9 @@ else:
 
                         st.dataframe(styled_df, use_container_width=True, hide_index=True)
                     else:
-                        st.info(f"💡 아직 [{selected_shift}] 파트의 제출된 점검 내역이 없습니다.")
-                except Exception:
+                        ym_info = f"{selected_ym} " if selected_ym else ""
+                        st.info(f"💡 아직 {ym_info}[{selected_shift}] 파트의 제출된 점검 내역이 없습니다.")
+                except Exception as e:
                     st.warning("💡 Supabase 'checklist' 테이블 확인이 필요합니다.")
 
             with tab_setting:
@@ -2838,7 +2857,6 @@ else:
                         st.rerun()
                 else:
                     st.info(f"💡 [{target_shift}] 파트에 등록된 점검 항목이 없습니다. 위에서 새 항목을 추가해 주세요.")
-
         # --------------------------------------------------
         # 점주 메뉴: ⏰ 알바생 근무 스케줄 설정 및 관리
         # --------------------------------------------------
