@@ -9,8 +9,90 @@ import pandas as pd
 import plotly.express as px
 from supabase import Client, create_client
 import streamlit as st
+import calendar
+import datetime
+import streamlit as st
 import streamlit.components.v1 as components
 
+def get_korean_date_picker(label="날짜 선택", key_prefix="sales_date_picker"):
+    """브라우저 설정과 관계없이 100% 한글 팝업 달력을 제공하는 위젯"""
+    state_val_key = f"{key_prefix}_val"
+    if state_val_key not in st.session_state:
+        st.session_state[state_val_key] = datetime.date.today()
+
+    curr_date = st.session_state[state_val_key]
+    formatted_date_str = curr_date.strftime("%Y년 %m월 %d일")
+
+    # 팝업 버튼 (클릭 시 한글 달력 열림)
+    with st.popover(
+        f"📅 {label}: {formatted_date_str}", use_container_width=True
+    ):
+        col_y, col_m = st.columns(2)
+        years = list(range(2020, 2031))
+
+        # 연도 및 월 선택
+        sel_y = col_y.selectbox(
+            "년도",
+            years,
+            index=years.index(curr_date.year),
+            key=f"{key_prefix}_y",
+            label_visibility="collapsed",
+        )
+        sel_m = col_m.selectbox(
+            "월",
+            list(range(1, 13)),
+            index=curr_date.month - 1,
+            format_func=lambda x: f"{x}월",
+            key=f"{key_prefix}_m",
+            label_visibility="collapsed",
+        )
+
+        st.write("")
+
+        # 한글 요일 헤더
+        weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+        hdr_cols = st.columns(7)
+        for idx, w in enumerate(weekdays):
+            hdr_cols[idx].markdown(
+                f"<div style='text-align: center; font-weight: bold; font-size: 13px;'>{w}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # 달력 일자 그리드 생성
+        first_weekday, num_days = calendar.monthrange(sel_y, sel_m)
+        day_counter = 1
+
+        for week in range(6):
+            if day_counter > num_days:
+                break
+            grid_cols = st.columns(7)
+            for d_idx in range(7):
+                if (
+                    week == 0 and d_idx < first_weekday
+                ) or day_counter > num_days:
+                    grid_cols[d_idx].write("")
+                else:
+                    day_num = day_counter
+                    is_selected = (
+                        sel_y == curr_date.year
+                        and sel_m == curr_date.month
+                        and day_num == curr_date.day
+                    )
+                    btn_type = "primary" if is_selected else "secondary"
+
+                    if grid_cols[d_idx].button(
+                        str(day_num),
+                        key=f"{key_prefix}_grid_{sel_y}_{sel_m}_{day_num}",
+                        type=btn_type,
+                        use_container_width=True,
+                    ):
+                        st.session_state[state_val_key] = datetime.date(
+                            sel_y, sel_m, day_num
+                        )
+                        st.rerun()
+                    day_counter += 1
+
+    return st.session_state[state_val_key]
 
 def apply_date_colors(df, date_col):
     """데이터프레임의 날짜 컬럼에서 토요일(파란색), 일요일(빨간색) 글자색을 적용합니다."""
@@ -633,7 +715,8 @@ if user_mode == "📱 알바생 전용 모드":
                 else:
                     st.error("❌ PIN 번호가 올바르지 않습니다.")
 
-    # --- 2. 오픈/마감 체크리스트 ---
+ 
+# --- 2. 오픈/마감 체크리스트 ---
     with tab_st2:
         st.subheader("📋 업무 체크리스트 수행 및 수정")
 
@@ -704,12 +787,17 @@ if user_mode == "📱 알바생 전용 모드":
                         "created_at": now_str
                     }
 
+                    # existing_record가 있을 경우 id를 payload에 포함하여 확실하게 업데이트
+                    if existing_record and "id" in existing_record:
+                        payload["id"] = existing_record["id"]
+
                     try:
-                        if existing_record and "id" in existing_record:
-                            supabase.table("checklist").update(payload).eq("id", existing_record["id"]).execute()
+                        # insert 대신 on_conflict="date"를 명시한 upsert 적용
+                        supabase.table("checklist").upsert(payload, on_conflict="date").execute()
+
+                        if existing_record:
                             st.success(f"✅ [{chk_type}] 체크리스트가 성공적으로 수정되었습니다!")
                         else:
-                            supabase.table("checklist").insert(payload).execute()
                             st.success(f"✅ [{chk_type}] 체크리스트가 성공적으로 제출되었습니다!")
 
                         st.rerun()
@@ -717,6 +805,7 @@ if user_mode == "📱 알바생 전용 모드":
                         st.error(f"❌ 저장 중 오류가 발생했습니다: {e}")
         else:
             st.info("💡 등록된 체크리스트 항목이 없습니다. 관리자 메뉴에서 항목을 등록해 주세요.")
+        
 
     # --- 3. 알바생 인수인계 ---
     with tab_st3:
@@ -1257,7 +1346,9 @@ else:
 
         admin_menu = st.sidebar.selectbox("점주 관리 메뉴", admin_menu_options)
 
-# =========================================================
+
+    
+          # =========================================================
         # [점주 메뉴 1] 매출 분석 & 손익계산서 (홀 / 배달 플랫폼별 구분)
         # =========================================================
         if admin_menu == "📝 매출 분석 & 손익계산서(P&L)":
@@ -1294,8 +1385,8 @@ else:
             if not platform_list:
                 platform_list = ["배달의민족", "쿠팡이츠", "요기요", "땡겨요", "기타"]
 
-            # 📅 공통 날짜 선택 (탭 상단배치)
-            sales_date = st.date_input("📅 매출 날짜 선택", key="sales_date_picker")
+            # 📅 공통 날짜 선택
+            sales_date = get_korean_date_picker("매출 날짜 선택", key_prefix="sales_date_picker")
 
             # 기존 DB 데이터 조회
             existing_res = (
@@ -1349,7 +1440,7 @@ else:
             tab_input, tab_history = st.tabs(["📝 매출 입력", "📋 매출 내역"])
 
             # =========================================================
-            # [TAB 1] 매출 입력
+            # [TAB 1] 매출 입력 및 저장
             # =========================================================
             with tab_input:
                 with st.expander("➕ 일별 세부 매출 입력 및 관리", expanded=True):
@@ -1530,97 +1621,54 @@ else:
                             f"= **배달 순매출 `{total_delivery_net:,}`원**"
                         )
 
+                # ---------------------------------------------------------
+                # 💾 매출 저장 (중복 요약 지표 제거)
+                # ---------------------------------------------------------
+                total_sales_calc = hall_sales_calc + total_delivery_net
+
+                sales_memo = st.text_input(
+                    "📝 메모 / 특이사항", value=init_memo, key=f"memo_{sales_date}"
+                )
+
+                if st.button("💾 매출 저장", type="primary", use_container_width=True, key=f"save_btn_{sales_date}"):
+                    main_platform = (
+                        saved_delivery_details[0]["platform"]
+                        if saved_delivery_details
+                        else "배달"
+                    )
+
+                    supabase.table("daily_sales").upsert(
+                        {
+                            "date": str(sales_date),
+                            "cash_sales": cash_sales,
+                            "card_sales": card_sales,
+                            "other_sales": other_sales,
+                            "reward_sales": reward_sales,
+                            "hall_sales": hall_sales_calc,
+                            "delivery_platform": main_platform,
+                            "delivery_gross": total_delivery_gross,
+                            "delivery_fee_rate": saved_delivery_details[0]["fee_rate"]
+                            if saved_delivery_details
+                            else 0,
+                            "delivery_sales": total_delivery_net,
+                            "delivery_count": total_delivery_count,
+                            "rider_fee": total_rider_fee,
+                            "delivery_details": saved_delivery_details,
+                            "sales_amount": total_sales_calc,
+                            "memo": sales_memo,
+                        },
+                        on_conflict="date",
+                    ).execute()
+
+                    st.success(
+                        f"✅ [{sales_date}] 매출 기록이 성공적으로 저장되었습니다! (총 매출: {total_sales_calc:,}원)"
+                    )
+                    st.rerun()
+
             # =========================================================
             # [TAB 2] 매출 내역 (선택 날짜 월 내역 조회)
             # =========================================================
             with tab_history:
-                # 📊 선택 일자 총 매출 현황 및 저장 영역
-                with st.expander("📊 일별 총 매출 현황 및 저장", expanded=True):
-                    st.markdown(f"##### 📊 [{sales_date}] 매출 종합 요약")
-                    total_sales_calc = hall_sales_calc + total_delivery_net
-
-                    col_s1, col_s2, col_s3 = st.columns(3)
-                    col_s1.metric("🏢 총 홀 매출", f"{hall_sales_calc:,} 원")
-                    col_s2.metric("🛵 총 배달 순매출", f"{total_delivery_net:,} 원")
-                    col_s3.metric("💰 최종 합계 매출", f"{total_sales_calc:,} 원")
-
-                    st.write("---")
-                    st.markdown("📋 **🏢 홀 매출 항목별 상세 내역**")
-                    col_h1, col_h2, col_h3, col_h4 = st.columns(4)
-                    col_h1.metric("💵 현금 매출", f"{cash_sales:,} 원")
-                    col_h2.metric("💳 카드 매출", f"{card_sales:,} 원")
-                    col_h3.metric("📦 기타 매출", f"{other_sales:,} 원")
-                    col_h4.metric("🎁 리워드/쿠폰", f"{reward_sales:,} 원")
-
-                    st.write("---")
-                    st.markdown("📋 **🛵 배달 플랫폼별 내역 상세**")
-                    if saved_delivery_details:
-                        st.dataframe(
-                            saved_delivery_details,
-                            column_config={
-                                "platform": "플랫폼",
-                                "fee_rate": st.column_config.NumberColumn("중개수수료율", format="%.1f%%"),
-                                "gross": st.column_config.NumberColumn("총 매출액", format="%d 원"),
-                                "count": st.column_config.NumberColumn("건수", format="%d 건"),
-                                "rider_fee_per_order": st.column_config.NumberColumn("건당 라이더비", format="%d 원"),
-                                "platform_fee": st.column_config.NumberColumn("플랫폼 수수료", format="%d 원"),
-                                "rider_fee_tot": st.column_config.NumberColumn("총 라이더비", format="%d 원"),
-                                "net": st.column_config.NumberColumn("정산 순매출", format="%d 원"),
-                            },
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    else:
-                        st.write("등록된 배달 매출 내역이 없습니다.")
-
-                    st.write("---")
-                    sales_memo = st.text_input(
-                        "📝 메모 / 특이사항", value=init_memo, key=f"memo_{sales_date}"
-                    )
-
-                    st.success(
-                        f"💡 **[{sales_date}] 저장 예정 금액:** 총 매출 `{total_sales_calc:,}` 원 "
-                        f"(홀: {hall_sales_calc:,}원 / 배달 순매출: {total_delivery_net:,}원)"
-                    )
-
-                    if st.button("💾 매출 저장", type="primary", use_container_width=True):
-                        main_platform = (
-                            saved_delivery_details[0]["platform"]
-                            if saved_delivery_details
-                            else "배달"
-                        )
-
-                        supabase.table("daily_sales").upsert(
-                            {
-                                "date": str(sales_date),
-                                "cash_sales": cash_sales,
-                                "card_sales": card_sales,
-                                "other_sales": other_sales,
-                                "reward_sales": reward_sales,
-                                "hall_sales": hall_sales_calc,
-                                "delivery_platform": main_platform,
-                                "delivery_gross": total_delivery_gross,
-                                "delivery_fee_rate": saved_delivery_details[0]["fee_rate"]
-                                if saved_delivery_details
-                                else 0,
-                                "delivery_sales": total_delivery_net,
-                                "delivery_count": total_delivery_count,
-                                "rider_fee": total_rider_fee,
-                                "delivery_details": saved_delivery_details,
-                                "sales_amount": total_sales_calc,
-                                "memo": sales_memo,
-                            },
-                            on_conflict="date",
-                        ).execute()
-
-                        st.success(
-                            f"✅ [{sales_date}] 매출 기록이 성공적으로 저장되었습니다! (총 매출: {total_sales_calc:,}원)"
-                        )
-                        st.rerun()
-
-                st.write("---")
-
-                # 📋 선택된 날짜의 월 데이터만 조회
                 import calendar
 
                 start_of_month = sales_date.replace(day=1)
@@ -1683,7 +1731,8 @@ else:
 
             with st.expander("➕ 새로운 엠즈푸드 발주 내역 입력", expanded=True):
                 col_m1, col_m2, col_m3 = st.columns([2, 2, 3])
-                order_date = col_m1.date_input("📅 발주 날짜", key="mfood_date_picker")
+                with col_m1:
+                    order_date = get_korean_date_picker("📅 발주 날짜", key_prefix="mfood_date_picker")
                 item_name = col_m2.text_input("🏷️ 품목명 / 내역", placeholder="예: 원두, 우유, 파우더 등", key="mfood_item_input")
                 order_amount = col_m3.number_input("💵 발주 금액 (원)", min_value=0, step=1000, key="mfood_amount_input")
 
@@ -1819,9 +1868,7 @@ else:
                     else:
                         st.info("해당 월에는 삭제할 발주 내역이 없습니다.")
             else:
-                st.info("💡 등록된 엠즈푸드 발주 내역이 없습니다. 위에서 새로운 발주 내역을 입력해 주세요.")
-
-     
+                st.info("💡 등록된 엠즈푸드 발주 내역이 없습니다. 위에서 새로운 발주 내역을 입력해 주세요.")     
        # =========================================================================
         # 3. 종합 매출/비용 시각화 분석
         # =========================================================================
