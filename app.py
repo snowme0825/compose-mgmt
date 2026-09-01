@@ -557,13 +557,13 @@ if pending_shifts > 0:
     )
 
 user_mode = st.sidebar.radio(
-    "접속 모드를 선택하세요", ["📱 알바생 전용 모드", "🔒 점주 관리자 모드"]
+    "접속 모드를 선택하세요", ["📱 직원 전용 모드", "🔒 점주 관리자 모드"]
 )
 
 # ==========================================
-# [모드 1] 📱 알바생 전용 모드
+# [모드 1] 📱 직원 전용 모드
 # ==========================================
-if user_mode == "📱 알바생 전용 모드":
+if user_mode == "📱 직원 전용 모드":
     staff_dict = get_staff_info()
     staff_names = list(staff_dict.keys()) if staff_dict else []
 
@@ -583,7 +583,7 @@ if user_mode == "📱 알바생 전용 모드":
     tab_st1, tab_st2, tab_st3, tab_st4, tab_st5, tab_st6, tab_st7 = st.tabs([
         "⏰ 출퇴근 찍기",
         "📋 오픈/마감 체크리스트",
-        "🤝 알바생 인수인계",
+        "🤝 직원 인수인계",
         "📦 재고 실사 점검",
         "🗑️ 유통기한/폐기 보고",
         "🔄 대타 교대 신청",
@@ -807,9 +807,9 @@ if user_mode == "📱 알바생 전용 모드":
             st.info("💡 등록된 체크리스트 항목이 없습니다. 관리자 메뉴에서 항목을 등록해 주세요.")
         
 
-    # --- 3. 알바생 인수인계 ---
+    # --- 3. 직원 인수인계 ---
     with tab_st3:
-        st.subheader("🤝 알바생 근무 인수인계 작성 및 확인")
+        st.subheader("🤝 직원 근무 인수인계 작성 및 확인")
 
         col_ho1, col_ho2 = st.columns(2)
         with col_ho1:
@@ -1059,7 +1059,7 @@ if user_mode == "📱 알바생 전용 모드":
 
                         supabase.table("inventory_audit").insert(audit_logs).execute()
 
-                        st.success("✅ 재고 실사 제출 완료! 점주 메뉴 [알바생 실사 점검 이력]에 즉시 연동되었습니다.")
+                        st.success("✅ 재고 실사 제출 완료! 점주 메뉴 [직원 실사 점검 이력]에 즉시 연동되었습니다.")
                         st.rerun()
 
                     except Exception as e:
@@ -1166,7 +1166,7 @@ if user_mode == "📱 알바생 전용 모드":
 
     # --- 6. 대타 신청 ---
     with tab_st6:
-        st.subheader("🔄 알바생 대타 / 근무 교대 신청")
+        st.subheader("🔄 직원 대타 / 근무 교대 신청")
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -1310,10 +1310,10 @@ else:
             "📈 종합 매출/비용 시각화 분석",
             shift_menu_label,
             "💸 지출 및 비용 관리",
-            "🤝 알바생 인수인계 이력 점검",
+            "🤝 직원 인수인계 이력 점검",
             "🗑️ 원자재 폐기 이력 & 손실 점검",
             "📋 오픈/마감 체크리스트 점검",
-            "⏰ 알바생 캘린더 스케줄 관리",
+            "⏰ 직원 캘린더 스케줄 관리",
             "📦 재고 현황 & 원가 관리",
             "💰 전체 인건비 정산",
             "👥 직원 PIN & 시급 관리",
@@ -2472,10 +2472,10 @@ else:
                 st.info("전체 대타 교대 이력이 없습니다.")
 
    # =========================================================================
-        # 6. 알바생 인수인계 이력 점검
+        # 6. 직원 인수인계 이력 점검
         # =========================================================================
-        elif admin_menu == "🤝 알바생 인수인계 이력 점검":
-            st.subheader("🤝 알바생 근무 인수인계 이력 조회")
+        elif admin_menu == "🤝 직원 인수인계 이력 점검":
+            st.subheader("🤝 직원 근무 인수인계 이력 조회")
 
             try:
                 res_ho = (
@@ -2549,10 +2549,10 @@ else:
         # =========================================================================
         elif admin_menu == "🗑️ 원자재 폐기 이력 & 손실 점검":
             st.subheader("🗑️ 원자재 폐기 이력 & 재고 실사 점검")
-            st.info("💡 알바생 모드에서 등록된 유통기한/파손 폐기 내역 및 재고 실사 점검 이력을 실시간으로 조회합니다.")
+            st.info("💡 직원 모드에서 등록된 유통기한/파손 폐기 내역 및 재고 실사 점검 이력을 실시간으로 조회합니다.")
 
             # ---------------------------------------------------------------------
-            # 1. 알바생 폐기 등록 내역 (waste)
+            # 1. 직원 폐기 등록 내역 (waste)
             # ---------------------------------------------------------------------
             try:
                 waste_res = supabase.table("waste").select("*").execute()
@@ -2561,7 +2561,7 @@ else:
                 waste_df = pd.DataFrame()
 
             # ---------------------------------------------------------------------
-            # 2. 알바생 재고 실사 내역 (inventory_audit 우선 조회)
+            # 2. 직원 재고 실사 내역 (inventory_audit 우선 조회)
             # ---------------------------------------------------------------------
             inv_log_df = pd.DataFrame()
             audit_tables = ["inventory_audit", "stock_check", "inventory_log", "inventory_logs"]
@@ -2635,7 +2635,7 @@ else:
             tab1, tab2 = st.tabs(["📋 폐기 보고 내역", "🔍 재고 실사 점검 내역"])
 
             with tab1:
-                st.markdown("#### 🚨 알바생 폐기 보고 내역")
+                st.markdown("#### 🚨 직원 폐기 보고 내역")
                 if not waste_df.empty:
                     display_cols = ["date", "item_name", "qty", "calc_loss", "reason", "calc_worker"]
                     show_cols = [c for c in display_cols if c in waste_df.columns]
@@ -2652,7 +2652,7 @@ else:
                             "qty": "폐기 수량",
                             "calc_loss": st.column_config.NumberColumn("손실 금액", format="%d 원"),
                             "reason": "폐기 사유",
-                            "calc_worker": "작성자/알바생",
+                            "calc_worker": "작성자/직원",
                         },
                         use_container_width=True,
                         hide_index=True
@@ -2663,7 +2663,7 @@ else:
            
         
             with tab2:
-                st.markdown("#### 📦 알바생 재고 실사 점검 이력")
+                st.markdown("#### 📦 직원 재고 실사 점검 이력")
                 if not inv_log_df.empty:
                     # --- 캘린더 기반 콤팩트 필터 ---
                     col_f1, col_f2 = st.columns(2)
@@ -2731,10 +2731,10 @@ else:
         elif "체크리스트" in admin_menu:
             st.subheader("📋 오픈/마감 체크리스트 관리 (점주 전용)")
 
-            tab_history, tab_setting = st.tabs(["📊 알바생 점검 내역 조회", "⚙️ 오픈/마감 항목 관리"])
+            tab_history, tab_setting = st.tabs(["📊 직원 점검 내역 조회", "⚙️ 오픈/마감 항목 관리"])
 
             with tab_history:
-                st.write("#### 📅 알바생 점검 완료 내역")
+                st.write("#### 📅 직원 점검 완료 내역")
 
                 col_view1, col_view2 = st.columns([2, 2])
                 with col_view1:
@@ -2784,7 +2784,7 @@ else:
                             row_dict = {
                                 "날짜": r.get("date"),
                                 "근무 파트": r.get("shift_type", selected_shift),
-                                "점검자(알바생)": r.get("staff_name", "-"),
+                                "점검자(직원)": r.get("staff_name", "-"),
                             }
                             items_status = r.get("checked_items") or {}
 
@@ -2807,7 +2807,7 @@ else:
 
             with tab_setting:
                 st.write("#### 📌 오픈 / 마감 파트별 점검 항목 설정")
-                st.caption("💡 이곳에서 설정한 파트별 항목이 알바생 점검 화면에 실시간으로 구분되어 연동됩니다.")
+                st.caption("💡 이곳에서 설정한 파트별 항목이 직원 점검 화면에 실시간으로 구분되어 연동됩니다.")
 
                 target_shift = st.radio("설정할 파트 선택", ["☀️ 오픈", "🌙 마감"], horizontal=True, key="admin_chk_setting_shift")
 
@@ -2840,7 +2840,7 @@ else:
 
                 st.write("---")
                 if checklist_items:
-                    st.write(f"**[{target_shift} 파트 알바생 표시 항목 목록]**")
+                    st.write(f"**[{target_shift} 파트 직원 표시 항목 목록]**")
                     for idx, item in enumerate(checklist_items, 1):
                         st.write(f"**{idx}.** {item}")
 
@@ -2858,10 +2858,10 @@ else:
                 else:
                     st.info(f"💡 [{target_shift}] 파트에 등록된 점검 항목이 없습니다. 위에서 새 항목을 추가해 주세요.")
         # --------------------------------------------------
-        # 점주 메뉴: ⏰ 알바생 근무 스케줄 설정 및 관리
+        # 점주 메뉴: ⏰ 직원 근무 스케줄 설정 및 관리
         # --------------------------------------------------
-        elif admin_menu == "⏰ 알바생 근무 스케줄 설정 및 관리" or "스케줄" in admin_menu:
-            st.subheader("🗓️ 알바생 근무 캘린더 & 스케줄 관리")
+        elif admin_menu == "⏰ 직원 근무 스케줄 설정 및 관리" or "스케줄" in admin_menu:
+            st.subheader("🗓️ 직원 근무 캘린더 & 스케줄 관리")
 
             # Session State 초기화 (클릭한 날짜 저장용)
             if "selected_sch_date" not in st.session_state:
@@ -3637,7 +3637,7 @@ else:
 
         # 13. 공지사항 수정
         elif admin_menu == "📢 공지사항 수정":
-            st.subheader("📢 알바생 게시판 공지사항 작성/수정")
+            st.subheader("📢 직원 게시판 공지사항 작성/수정")
 
             notice_curr, _ = get_notice()
             notice_input = st.text_area(
