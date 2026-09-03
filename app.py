@@ -182,7 +182,7 @@ supabase = init_supabase()
 
 
 # ==========================================
-# 0. 유틸리티 (안전 파싱 & 보안 암호화)
+# 0. 유틸리티 (안전 파싱 & 보안 암호화 & 회계 포맷)
 # ==========================================
 def hash_str(val: str) -> str:
     """문자열을 SHA-256 해시값으로 변환합니다."""
@@ -218,6 +218,17 @@ def safe_float(val, default=0.0):
         return default
 
 
+def format_money(val, unit="원"):
+    """숫자를 천 단위 쉼표가 적용된 회계 표기 문자열(예: 1,000,000원)로 변환합니다."""
+    try:
+        if pd.isna(val) or val is None or str(val).strip() == "":
+            return f"0{unit}"
+        clean_num = int(float(str(val).replace(",", "")))
+        return f"{clean_num:,}{unit}"
+    except (ValueError, TypeError):
+        return f"0{unit}"
+
+
 # ==========================================
 # 1. Supabase 기반 비즈니스 로직 함수
 # ==========================================
@@ -245,7 +256,7 @@ def get_staff_info():
         {
             r["name"]: {
                 "pin": r["pin"],
-                "hourly_rate": r["hourly_rate"],
+                "hourly_rate": safe_int(r["hourly_rate"], 10030),
                 "role": r.get("role", "알바"),
             }
             for r in res.data
@@ -606,7 +617,15 @@ if user_mode == "📱 직원 전용 모드":
             )
 
         today_str = datetime.datetime.now(KST).date().strftime("%Y-%m-%d")
-        days_kr = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+        days_kr = [
+            "월요일",
+            "화요일",
+            "수요일",
+            "목요일",
+            "금요일",
+            "토요일",
+            "일요일",
+        ]
         today_weekday = days_kr[datetime.datetime.now(KST).date().weekday()]
         now_time = datetime.datetime.now(KST).strftime("%H:%M")
 
@@ -630,7 +649,9 @@ if user_mode == "📱 직원 전용 모드":
                 .eq("date", today_str)
                 .execute()
             )
-            sched_today = res_sched.data[0] if res_sched and res_sched.data else None
+            sched_today = (
+                res_sched.data[0] if res_sched and res_sched.data else None
+            )
         except Exception as e:
             st.error(f"⚠️ 출퇴근 데이터 조회 오류: {e}")
 
@@ -646,7 +667,9 @@ if user_mode == "📱 직원 전용 모드":
         col_btn1, col_btn2 = st.columns(2)
 
         with col_btn1:
-            if st.button("▶️ 출근하기", use_container_width=True, type="primary"):
+            if st.button(
+                "▶️ 출근하기", use_container_width=True, type="primary"
+            ):
                 if selected_staff in staff_dict and verify_hash(
                     input_pin, staff_dict[selected_staff]["pin"]
                 ):
@@ -656,11 +679,14 @@ if user_mode == "📱 직원 전용 모드":
                         late_min = 0
                         if sched_today:
                             sched_start = datetime.datetime.strptime(
-                                f"{today_str} {sched_today['start_time']}", "%Y-%m-%d %H:%M"
+                                f"{today_str} {sched_today['start_time']}",
+                                "%Y-%m-%d %H:%M",
                             ).replace(tzinfo=KST)
                             now_dt = datetime.datetime.now(KST)
                             if now_dt > sched_start:
-                                late_min = int((now_dt - sched_start).total_seconds() / 60)
+                                late_min = int(
+                                    (now_dt - sched_start).total_seconds() / 60
+                                )
 
                         supabase.table("attendance").insert({
                             "staff_name": selected_staff,
@@ -670,12 +696,20 @@ if user_mode == "📱 직원 전용 모드":
                         }).execute()
 
                         if late_min > 0:
-                            st.warning(f"✅ 출근 처리되었습니다. (지각 {late_min}분)")
+                            st.warning(
+                                f"✅ 출근 처리되었습니다. (지각 {late_min}분)"
+                            )
                         else:
-                            st.success("✅ 정상 출근 처리되었습니다. 오늘 하루도 화이팅!")
+                            st.success(
+                                "✅ 정상 출근 처리되었습니다. 오늘 하루도"
+                                " 화이팅!"
+                            )
                         st.rerun()
                 else:
-                    st.error("❌ PIN 번호가 일치하지 않거나 직원이 선택되지 않았습니다.")
+                    st.error(
+                        "❌ PIN 번호가 일치하지 않거나 직원이 선택되지"
+                        " 않았습니다."
+                    )
 
         with col_btn2:
             if st.button("⏹️ 퇴근하기", use_container_width=True):
@@ -683,7 +717,9 @@ if user_mode == "📱 직원 전용 모드":
                     input_pin, staff_dict[selected_staff]["pin"]
                 ):
                     if not att_today:
-                        st.error("출근 기록이 없습니다. 출근을 먼저 찍어주세요.")
+                        st.error(
+                            "출근 기록이 없습니다. 출근을 먼저 찍어주세요."
+                        )
                     elif att_today.get("clock_out") is not None:
                         st.warning("이미 퇴근 처리가 완료되었습니다.")
                     else:
@@ -694,20 +730,25 @@ if user_mode == "📱 직원 전용 모드":
                             f"{today_str} {clock_in_time}", "%Y-%m-%d %H:%M"
                         ).replace(tzinfo=KST)
                         t2 = now
-                        hours_worked = round((t2 - t1).total_seconds() / 3600.0, 2)
+                        hours_worked = round(
+                            (t2 - t1).total_seconds() / 3600.0, 2
+                        )
 
                         early_leave_minutes = 0
                         if sched_today and "end_time" in sched_today:
                             sched_end = datetime.datetime.strptime(
-                                f"{today_str} {sched_today['end_time']}", "%Y-%m-%d %H:%M"
+                                f"{today_str} {sched_today['end_time']}",
+                                "%Y-%m-%d %H:%M",
                             ).replace(tzinfo=KST)
                             if t2 < sched_end:
-                                early_leave_minutes = int((sched_end - t2).total_seconds() / 60)
+                                early_leave_minutes = int(
+                                    (sched_end - t2).total_seconds() / 60
+                                )
 
                         supabase.table("attendance").update({
                             "clock_out": now.strftime("%H:%M"),
                             "work_hours": hours_worked,
-                            "early_leave_minutes": early_leave_minutes
+                            "early_leave_minutes": early_leave_minutes,
                         }).eq("id", att_today["id"]).execute()
 
                         st.success("퇴근 처리가 정상 완료되었습니다!")
@@ -715,14 +756,20 @@ if user_mode == "📱 직원 전용 모드":
                 else:
                     st.error("❌ PIN 번호가 올바르지 않습니다.")
 
- 
-# --- 2. 오픈/마감 체크리스트 ---
+    # --- 2. 오픈/마감 체크리스트 ---
     with tab_st2:
         st.subheader("📋 업무 체크리스트 수행 및 수정")
 
         col_st1, col_st2 = st.columns(2)
-        chk_date = col_st1.date_input("점검 날짜", datetime.date.today(), key="staff_chk_date")
-        chk_type = col_st2.radio("체크리스트 구분", ["☀️ 오픈", "🌙 마감"], horizontal=True, key="staff_chk_type")
+        chk_date = col_st1.date_input(
+            "점검 날짜", datetime.date.today(), key="staff_chk_date"
+        )
+        chk_type = col_st2.radio(
+            "체크리스트 구분",
+            ["☀️ 오픈", "🌙 마감"],
+            horizontal=True,
+            key="staff_chk_type",
+        )
 
         checker_name = st.selectbox(
             "수행자 이름",
@@ -730,7 +777,11 @@ if user_mode == "📱 직원 전용 모드":
             key="chk_staff",
         )
 
-        setting_key = "checklist_open_items" if "오픈" in chk_type else "checklist_close_items"
+        setting_key = (
+            "checklist_open_items"
+            if "오픈" in chk_type
+            else "checklist_close_items"
+        )
         default_items = (
             ["오픈 매장 청소", "원두/시럽 재고 점검", "머신 예열 및 세팅"]
             if "오픈" in chk_type
@@ -755,13 +806,18 @@ if user_mode == "📱 직원 전용 모드":
                 )
                 if chk_res and chk_res.data:
                     existing_record = chk_res.data[0]
-                    existing_checked = existing_record.get("checked_items") or {}
+                    existing_checked = (
+                        existing_record.get("checked_items") or {}
+                    )
                     existing_memo = existing_record.get("memo") or ""
             except Exception:
                 pass
 
             if existing_record:
-                st.info(f"💡 [{date_str}] **{chk_type}** 이미 제출된 점검 내역이 있습니다. 수정 후 재제출할 수 있습니다.")
+                st.info(
+                    f"💡 [{date_str}] **{chk_type}** 이미 제출된 점검 내역이"
+                    " 있습니다. 수정 후 재제출할 수 있습니다."
+                )
             else:
                 st.write(f"**[{chk_type} 필수 점검 항목]**")
 
@@ -769,14 +825,30 @@ if user_mode == "📱 직원 전용 모드":
                 checked_items_dict = {}
                 for idx, item in enumerate(items):
                     default_val = existing_checked.get(item, False)
-                    chk_val = st.checkbox(item, value=default_val, key=f"chk_item_{chk_type}_{date_str}_{idx}")
+                    chk_val = st.checkbox(
+                        item,
+                        value=default_val,
+                        key=f"chk_item_{chk_type}_{date_str}_{idx}",
+                    )
                     checked_items_dict[item] = chk_val
 
-                memo_input = st.text_input("비고 / 특이사항", value=existing_memo, placeholder="특이사항이 있을 경우 작성해 주세요.")
+                memo_input = st.text_input(
+                    "비고 / 특이사항",
+                    value=existing_memo,
+                    placeholder="특이사항이 있을 경우 작성해 주세요.",
+                )
 
-                submit_label = "💾 체크리스트 수정 완료" if existing_record else "📋 체크리스트 제출"
-                if st.form_submit_button(submit_label, type="primary", use_container_width=True):
-                    now_str = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+                submit_label = (
+                    "💾 체크리스트 수정 완료"
+                    if existing_record
+                    else "📋 체크리스트 제출"
+                )
+                if st.form_submit_button(
+                    submit_label, type="primary", use_container_width=True
+                ):
+                    now_str = datetime.datetime.now(KST).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
 
                     payload = {
                         "date": date_str,
@@ -784,28 +856,36 @@ if user_mode == "📱 직원 전용 모드":
                         "staff_name": checker_name,
                         "checked_items": checked_items_dict,
                         "memo": memo_input,
-                        "created_at": now_str
+                        "created_at": now_str,
                     }
 
-                    # existing_record가 있을 경우 id를 payload에 포함하여 확실하게 업데이트
                     if existing_record and "id" in existing_record:
                         payload["id"] = existing_record["id"]
 
                     try:
-                        # insert 대신 on_conflict="date"를 명시한 upsert 적용
-                        supabase.table("checklist").upsert(payload, on_conflict="date").execute()
+                        supabase.table("checklist").upsert(
+                            payload, on_conflict="date"
+                        ).execute()
 
                         if existing_record:
-                            st.success(f"✅ [{chk_type}] 체크리스트가 성공적으로 수정되었습니다!")
+                            st.success(
+                                f"✅ [{chk_type}] 체크리스트가 성공적으로"
+                                " 수정되었습니다!"
+                            )
                         else:
-                            st.success(f"✅ [{chk_type}] 체크리스트가 성공적으로 제출되었습니다!")
+                            st.success(
+                                f"✅ [{chk_type}] 체크리스트가 성공적으로"
+                                " 제출되었습니다!"
+                            )
 
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ 저장 중 오류가 발생했습니다: {e}")
         else:
-            st.info("💡 등록된 체크리스트 항목이 없습니다. 관리자 메뉴에서 항목을 등록해 주세요.")
-        
+            st.info(
+                "💡 등록된 체크리스트 항목이 없습니다. 관리자 메뉴에서 항목을"
+                " 등록해 주세요."
+            )
 
     # --- 3. 직원 인수인계 ---
     with tab_st3:
@@ -819,7 +899,9 @@ if user_mode == "📱 직원 전용 모드":
                 key="ho_sender",
             )
             ho_receiver = st.selectbox(
-                "인수자 (다음 근무자)", ["전체 공유"] + staff_names, key="ho_receiver"
+                "인수자 (다음 근무자)",
+                ["전체 공유"] + staff_names,
+                key="ho_receiver",
             )
         with col_ho2:
             ho_shift_type = st.selectbox(
@@ -828,7 +910,10 @@ if user_mode == "📱 직원 전용 모드":
                 key="ho_shift",
             )
             ho_pin = st.text_input(
-                "PIN 번호 (작성자 확인)", type="password", max_chars=4, key="ho_pin"
+                "PIN 번호 (작성자 확인)",
+                type="password",
+                max_chars=4,
+                key="ho_pin",
             )
 
         ho_content = st.text_area(
@@ -842,7 +927,9 @@ if user_mode == "📱 직원 전용 모드":
                 ho_pin, staff_dict[ho_sender]["pin"]
             ):
                 if ho_content.strip():
-                    now_str = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+                    now_str = datetime.datetime.now(KST).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
                     supabase.table("handover").insert({
                         "sender_name": ho_sender,
                         "receiver_name": ho_receiver,
@@ -863,12 +950,19 @@ if user_mode == "📱 직원 전용 모드":
 
         res_ho = (
             supabase.table("handover")
-            .select("id, sender_name, receiver_name, shift_type, content, created_at, is_read")
+            .select(
+                "id, sender_name, receiver_name, shift_type, content,"
+                " created_at, is_read"
+            )
             .order("id", desc=True)
             .limit(20)
             .execute()
         )
-        df_ho = pd.DataFrame(res_ho.data) if res_ho and res_ho.data else pd.DataFrame()
+        df_ho = (
+            pd.DataFrame(res_ho.data)
+            if res_ho and res_ho.data
+            else pd.DataFrame()
+        )
 
         if not df_ho.empty:
             df_ho.rename(
@@ -907,7 +1001,6 @@ if user_mode == "📱 직원 전용 모드":
                         key="ho_confirm_pin",
                     )
 
-                
                 if st.button("✅ 읽음 / 확인 완료 처리"):
                     matched_staff = None
                     for name, info in staff_dict.items():
@@ -916,34 +1009,46 @@ if user_mode == "📱 직원 전용 모드":
                             break
 
                     if matched_staff:
-                        # 💡 update(...)를 eq(...)보다 먼저 호출하도록 순서 변경
                         supabase.table("handover").update(
                             {"is_read": 1}
                         ).eq("id", target_ho_id).execute()
 
                         st.success(
-                            f"[{matched_staff}] 님이 인수인계 (#{target_ho_id}) 항목을 확인 완료 처리했습니다."
+                            f"[{matched_staff}] 님이 인수인계"
+                            f" (#{target_ho_id}) 항목을 확인 완료"
+                            " 처리했습니다."
                         )
                         st.rerun()
                     else:
                         st.error("❌ 올바른 PIN 번호를 입력해 주세요.")
-                else:
-                    st.info("등록된 인수인계 내역이 없습니다.")
+        else:
+            st.info("등록된 인수인계 내역이 없습니다.")
 
-
-
-       # --- 4. 재고 실사 점검 ---
+    # --- 4. 재고 실사 점검 ---
     with tab_st4:
         st.subheader("📦 실물 재고 실사 점검")
-        st.caption("현재 매장에 있는 실제 재고 수량을 파악하여 전산 재고를 최신 상태로 업데이트합니다.")
+        st.caption(
+            "현재 매장에 있는 실제 재고 수량을 파악하여 전산 재고를 최신"
+            " 상태로 업데이트합니다."
+        )
 
         col_inv1, col_inv2 = st.columns(2)
-        inv_reporter = col_inv1.selectbox("점검자 이름", staff_names if staff_names else ["직원없음"], key="inv_audit_reporter")
-        inv_pin = col_inv2.text_input("PIN 번호", type="password", max_chars=4, key="inv_audit_pin")
+        inv_reporter = col_inv1.selectbox(
+            "점검자 이름",
+            staff_names if staff_names else ["직원없음"],
+            key="inv_audit_reporter",
+        )
+        inv_pin = col_inv2.text_input(
+            "PIN 번호", type="password", max_chars=4, key="inv_audit_pin"
+        )
 
         inv_db_map = {}
         try:
-            inv_res = supabase.table("inventory").select("item_name, current_qty, unit, unit_price").execute()
+            inv_res = (
+                supabase.table("inventory")
+                .select("item_name, current_qty, unit, unit_price")
+                .execute()
+            )
             if inv_res and inv_res.data:
                 for row in inv_res.data:
                     inv_db_map[row["item_name"]] = {
@@ -954,7 +1059,13 @@ if user_mode == "📱 직원 전용 모드":
         except Exception as e:
             st.error(f"⚠️ 재고 데이터를 불러오는 중 오류 발생: {e}")
 
-        default_inv_items = ["원두 (kg)", "우유 (팩)", "빨대 (박스)", "24oz 컵 (박스)", "바닐라 시럽 (병)"]
+        default_inv_items = [
+            "원두 (kg)",
+            "우유 (팩)",
+            "빨대 (박스)",
+            "24oz 컵 (박스)",
+            "바닐라 시럽 (병)",
+        ]
         setting_inv_items = get_setting("inventory_items", default_inv_items)
 
         all_item_names = list(inv_db_map.keys())
@@ -964,7 +1075,9 @@ if user_mode == "📱 직원 전용 모드":
 
         all_audit_items = []
         for item_name in all_item_names:
-            db_info = inv_db_map.get(item_name, {"current_qty": 0, "unit": "개", "unit_price": 0})
+            db_info = inv_db_map.get(
+                item_name, {"current_qty": 0, "unit": "개", "unit_price": 0}
+            )
             all_audit_items.append({
                 "item_name": item_name,
                 "current_qty": db_info["current_qty"],
@@ -974,7 +1087,10 @@ if user_mode == "📱 직원 전용 모드":
 
         if all_audit_items:
             st.write("#### 📝 품목별 실사 수량 입력")
-            st.caption("💡 실제 수량을 입력하면 전산 수량과의 차이가 자동 계산되고 최신 재고로 반영됩니다.")
+            st.caption(
+                "💡 실제 수량을 입력하면 전산 수량과의 차이가 자동 계산되고"
+                " 최신 재고로 반영됩니다."
+            )
 
             with st.form(key="inventory_audit_form"):
                 actual_counts = {}
@@ -1002,7 +1118,7 @@ if user_mode == "📱 직원 전용 모드":
                         value=sys_qty,
                         step=1,
                         key=f"audit_qty_{idx}",
-                        label_visibility="collapsed"
+                        label_visibility="collapsed",
                     )
                     actual_counts[item_name] = actual_qty
 
@@ -1010,19 +1126,27 @@ if user_mode == "📱 직원 전용 모드":
                         f"{item_name} 메모",
                         placeholder="오차 사유 등",
                         key=f"audit_memo_{idx}",
-                        label_visibility="collapsed"
+                        label_visibility="collapsed",
                     )
                     memo_dict[item_name] = memo
 
                 st.write("---")
-                audit_submit = st.form_submit_button("💾 재고 실사 결과 제출 및 점주 모드 연동", type="primary", use_container_width=True)
+                audit_submit = st.form_submit_button(
+                    "💾 재고 실사 결과 제출 및 점주 모드 연동",
+                    type="primary",
+                    use_container_width=True,
+                )
 
             if audit_submit:
                 reporter_pin = staff_dict.get(inv_reporter, {}).get("pin", "")
 
                 if verify_hash(inv_pin, reporter_pin):
-                    now_str = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-                    today_date_str = datetime.datetime.now(KST).date().strftime("%Y-%m-%d")
+                    now_str = datetime.datetime.now(KST).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    today_date_str = (
+                        datetime.datetime.now(KST).date().strftime("%Y-%m-%d")
+                    )
 
                     try:
                         audit_logs = []
@@ -1036,15 +1160,18 @@ if user_mode == "📱 직원 전용 모드":
                             memo = memo_dict.get(item_name, "")
 
                             # 1. inventory 최신화
-                            supabase.table("inventory").upsert({
-                                "item_name": item_name,
-                                "current_qty": act_qty,
-                                "unit": unit,
-                                "unit_price": unit_price,
-                                "updated_at": now_str
-                            }, on_conflict="item_name").execute()
+                            supabase.table("inventory").upsert(
+                                {
+                                    "item_name": item_name,
+                                    "current_qty": act_qty,
+                                    "unit": unit,
+                                    "unit_price": unit_price,
+                                    "updated_at": now_str,
+                                },
+                                on_conflict="item_name",
+                            ).execute()
 
-                            # 2. 실사 이력 저장 (inventory_audit 테이블 표준 필드만 저장)
+                            # 2. 실사 이력 저장
                             audit_logs.append({
                                 "date": today_date_str,
                                 "item_name": item_name,
@@ -1054,12 +1181,17 @@ if user_mode == "📱 직원 전용 모드":
                                 "unit": unit,
                                 "checked_by": inv_reporter,
                                 "memo": memo,
-                                "created_at": now_str
+                                "created_at": now_str,
                             })
 
-                        supabase.table("inventory_audit").insert(audit_logs).execute()
+                        supabase.table("inventory_audit").insert(
+                            audit_logs
+                        ).execute()
 
-                        st.success("✅ 재고 실사 제출 완료! 점주 메뉴 [직원 실사 점검 이력]에 즉시 연동되었습니다.")
+                        st.success(
+                            "✅ 재고 실사 제출 완료! 점주 메뉴 [직원 실사"
+                            " 점검 이력]에 즉시 연동되었습니다."
+                        )
                         st.rerun()
 
                     except Exception as e:
@@ -1067,37 +1199,59 @@ if user_mode == "📱 직원 전용 모드":
                 else:
                     st.error("❌ PIN 번호가 틀렸습니다.")
         else:
-            st.info("💡 등록된 재고 품목이 없습니다. 점주 메뉴에서 재고 품목을 먼저 등록해 주세요.")
-    
+            st.info(
+                "💡 등록된 재고 품목이 없습니다. 점주 메뉴에서 재고 품목을 먼저"
+                " 등록해 주세요."
+            )
 
-   
-        # --- 5. 유통기한/폐기 보고 ---
+    # --- 5. 유통기한/폐기 보고 ---
     with tab_st5:
         st.subheader("🗑️ 유통기한 경과 / 파손 원자재 폐기 보고")
-        st.caption("버리게 된 원자재를 등록하면 재고 차감 및 폐기 손실 금액이 자동 계산됩니다.")
+        st.caption(
+            "버리게 된 원자재를 등록하면 재고 차감 및 폐기 손실 금액이 자동"
+            " 계산됩니다."
+        )
 
         col_w1, col_w2 = st.columns(2)
-        w_reporter = col_w1.selectbox("보고자", staff_names if staff_names else ["직원없음"], key="w_reporter")
-        w_pin = col_w2.text_input("PIN 번호", type="password", max_chars=4, key="w_pin")
+        w_reporter = col_w1.selectbox(
+            "보고자",
+            staff_names if staff_names else ["직원없음"],
+            key="w_reporter",
+        )
+        w_pin = col_w2.text_input(
+            "PIN 번호", type="password", max_chars=4, key="w_pin"
+        )
 
-        default_waste_reasons = ["유통기한 경과", "제조/조리 실수", "용기/포장 파손", "원두 추출 불량", "기타"]
+        default_waste_reasons = [
+            "유통기한 경과",
+            "제조/조리 실수",
+            "용기/포장 파손",
+            "원두 추출 불량",
+            "기타",
+        ]
         waste_reasons = get_setting("waste_reasons", default_waste_reasons)
 
-        default_inv_items = ["원두 (kg)", "우유 (팩)", "빨대 (박스)", "24oz 컵 (박스)", "바닐라 시럽 (병)"]
+        default_inv_items = [
+            "원두 (kg)",
+            "우유 (팩)",
+            "빨대 (박스)",
+            "24oz 컵 (박스)",
+            "바닐라 시럽 (병)",
+        ]
         setting_inv_items = get_setting("inventory_items", default_inv_items)
 
         inv_dict = {}
         try:
             inv_list_res = (
                 supabase.table("inventory")
-                .select("item_name, unit, unit_price, current_qty")  # cost_price -> unit_price 변경
+                .select("item_name, unit, unit_price, current_qty")
                 .execute()
             )
             if inv_list_res and inv_list_res.data:
                 for i in inv_list_res.data:
                     inv_dict[i["item_name"]] = {
                         "unit": i.get("unit", "개") or "개",
-                        "cost": safe_int(i.get("unit_price")),  # cost_price -> unit_price 변경
+                        "cost": safe_int(i.get("unit_price")),
                         "current_qty": safe_int(i.get("current_qty")),
                     }
         except Exception:
@@ -1105,42 +1259,55 @@ if user_mode == "📱 직원 전용 모드":
 
         for item_name in setting_inv_items:
             if item_name not in inv_dict:
-                inv_dict[item_name] = {
-                    "unit": "개",
-                    "cost": 0,
-                    "current_qty": 0
-                }
+                inv_dict[item_name] = {"unit": "개", "cost": 0, "current_qty": 0}
 
         if inv_dict:
             col_item, col_qty = st.columns([3, 1])
-            w_item = col_item.selectbox("폐기 품목", list(inv_dict.keys()), key="w_item_select")
-            w_qty = col_qty.number_input("폐기 수량", min_value=1, value=1, key="w_qty_input")
+            w_item = col_item.selectbox(
+                "폐기 품목", list(inv_dict.keys()), key="w_item_select"
+            )
+            w_qty = col_qty.number_input(
+                "폐기 수량", min_value=1, value=1, key="w_qty_input"
+            )
 
             item_cost = inv_dict[w_item]["cost"]
             calc_loss = item_cost * w_qty
             st.warning(
-                f"💰 **예상 손실 금액: {calc_loss:,} 원** (단가: {item_cost:,}원 / "
-                f"{inv_dict[w_item]['unit']})"
+                f"💰 **예상 손실 금액: {format_money(calc_loss)}** (단가:"
+                f" {format_money(item_cost)} / {inv_dict[w_item]['unit']})"
             )
 
-            w_reason = st.selectbox("폐기 사유", waste_reasons, key="w_reason_select")
+            w_reason = st.selectbox(
+                "폐기 사유", waste_reasons, key="w_reason_select"
+            )
 
-            if st.button("🗑️ 폐기 등록 제출", type="primary", use_container_width=True, key="btn_submit_waste"):
+            if st.button(
+                "🗑️ 폐기 등록 제출",
+                type="primary",
+                use_container_width=True,
+                key="btn_submit_waste",
+            ):
                 reporter_pin = staff_dict.get(w_reporter, {}).get("pin", "")
 
                 if verify_hash(w_pin, reporter_pin):
-                    now_str = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-                    today_date_str = datetime.datetime.now(KST).date().strftime("%Y-%m-%d")
+                    now_str = datetime.datetime.now(KST).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    today_date_str = (
+                        datetime.datetime.now(KST).date().strftime("%Y-%m-%d")
+                    )
                     new_qty = inv_dict[w_item]["current_qty"] - w_qty
 
                     try:
-                        # 재고 차감 시 unit_price 필드로 업데이트
-                        supabase.table("inventory").upsert({
-                            "item_name": w_item,
-                            "current_qty": new_qty,
-                            "unit": inv_dict[w_item]["unit"],
-                            "unit_price": item_cost
-                        }, on_conflict="item_name").execute()
+                        supabase.table("inventory").upsert(
+                            {
+                                "item_name": w_item,
+                                "current_qty": new_qty,
+                                "unit": inv_dict[w_item]["unit"],
+                                "unit_price": item_cost,
+                            },
+                            on_conflict="item_name",
+                        ).execute()
 
                         supabase.table("waste").insert({
                             "date": today_date_str,
@@ -1154,7 +1321,8 @@ if user_mode == "📱 직원 전용 모드":
                         }).execute()
 
                         st.success(
-                            f"✅ [{w_item}] {w_qty:,}개 폐기 보고 완료! (손실금액: {calc_loss:,}원 자동 반영됨)"
+                            f"✅ [{w_item}] {w_qty:,}개 폐기 보고 완료!"
+                            f" (손실금액: {format_money(calc_loss)} 자동 반영됨)"
                         )
                         st.rerun()
                     except Exception as e:
@@ -1162,7 +1330,10 @@ if user_mode == "📱 직원 전용 모드":
                 else:
                     st.error("❌ PIN 번호가 틀렸습니다.")
         else:
-            st.info("💡 등록된 재고 품목이 없습니다. 점주 메뉴에서 재고 품목을 설정해 주세요.")
+            st.info(
+                "💡 등록된 재고 품목이 없습니다. 점주 메뉴에서 재고 품목을"
+                " 설정해 주세요."
+            )
 
     # --- 6. 대타 신청 ---
     with tab_st6:
@@ -1170,8 +1341,16 @@ if user_mode == "📱 직원 전용 모드":
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            applicant = st.selectbox("신청자", staff_names if staff_names else ["직원없음"], key="shift_app")
-            substitute = st.selectbox("대타 근무자", staff_names if staff_names else ["직원없음"], key="shift_sub")
+            applicant = st.selectbox(
+                "신청자",
+                staff_names if staff_names else ["직원없음"],
+                key="shift_app",
+            )
+            substitute = st.selectbox(
+                "대타 근무자",
+                staff_names if staff_names else ["직원없음"],
+                key="shift_sub",
+            )
             shift_date = st.date_input("근무 교대 날짜", key="shift_req_date")
 
         with col_s2:
@@ -1198,7 +1377,10 @@ if user_mode == "📱 직원 전용 모드":
         try:
             shifts_res = (
                 supabase.table("shift_requests")
-                .select("applicant_name, substitute_name, shift_date, shift_time, reason, status")
+                .select(
+                    "applicant_name, substitute_name, shift_date, shift_time,"
+                    " reason, status"
+                )
                 .order("shift_date", desc=False)
                 .order("id", desc=False)
                 .execute()
@@ -1207,7 +1389,14 @@ if user_mode == "📱 직원 전용 모드":
                 pd.DataFrame(shifts_res.data)
                 if shifts_res and shifts_res.data
                 else pd.DataFrame(
-                    columns=["applicant_name", "substitute_name", "shift_date", "shift_time", "reason", "status"]
+                    columns=[
+                        "applicant_name",
+                        "substitute_name",
+                        "shift_date",
+                        "shift_time",
+                        "reason",
+                        "status",
+                    ]
                 )
             )
             df_shifts = df_shifts.rename(
@@ -1220,15 +1409,24 @@ if user_mode == "📱 직원 전용 모드":
                     "status": "상태",
                 }
             )
-            st.dataframe(style_date_dataframe(df_shifts, "날짜"), use_container_width=True)
+            st.dataframe(
+                style_date_dataframe(df_shifts, "날짜"),
+                use_container_width=True,
+            )
         except Exception as e:
             st.error(f"⚠️ 대타 신청 현황 불러오기 오류: {e}")
 
     # --- 7. 내 근무 기록 및 급여 ---
     with tab_st7:
         st.subheader("📄 내 근무 기록 및 급여 정산 조회")
-        my_name = st.selectbox("본인 이름 선택", staff_names if staff_names else ["직원없음"], key="my_name_select")
-        my_pin = st.text_input("PIN 번호 확인", type="password", max_chars=4, key="my_pin_check")
+        my_name = st.selectbox(
+            "본인 이름 선택",
+            staff_names if staff_names else ["직원없음"],
+            key="my_name_select",
+        )
+        my_pin = st.text_input(
+            "PIN 번호 확인", type="password", max_chars=4, key="my_pin_check"
+        )
 
         if st.button("🔍 조회하기"):
             user_pin = staff_dict.get(my_name, {}).get("pin", "")
@@ -1238,14 +1436,15 @@ if user_mode == "📱 직원 전용 모드":
                 st.markdown("#### 💰 이번 달 급여 정산 상세 내역")
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric("총 근무시간", f"{res['total_hours']} 시간")
-                c2.metric("기본급", f"{res['base_pay']:,} 원")
-                c3.metric("주휴수당 (자동)", f"{res['holiday_pay']:,} 원")
-                c4.metric("3.3% 세금 공제", f"-{res['tax_3_3']:,} 원")
-                c5.metric("최종 실수령액", f"{res['total_pay']:,} 원")
+                c2.metric("기본급", format_money(res["base_pay"]))
+                c3.metric("주휴수당 (자동)", format_money(res["holiday_pay"]))
+                c4.metric("3.3% 세금 공제", f"-{format_money(res['tax_3_3'])}")
+                c5.metric("최종 실수령액", format_money(res["total_pay"]))
 
                 st.caption(
-                    "💡 **주휴수당 조건:** 주 15시간 이상 근무 시 자동 계산 | **세금:** "
-                    "세전 총급여(기본급+주휴수당)의 3.3% 원천징수 공제"
+                    "💡 **주휴수당 조건:** 주 15시간 이상 근무 시 자동 계산 |"
+                    " **세금:** 세전 총급여(기본급+주휴수당)의 3.3% 원천징수"
+                    " 공제"
                 )
 
                 if not res["df"].empty:
@@ -1282,15 +1481,18 @@ else:
     # 1. KeyError 방지를 위해 .get() 활용
     if not st.session_state.get("admin_logged_in", False):
         st.subheader("🔒 관리자 로그인")
-        admin_pw_input = st.text_input("점주 비밀번호를 입력해 주세요", type="password")
-        if st.button("🔑 로그인", type="primary"):
-            current_admin_pw = get_admin_password()
-            if verify_hash(admin_pw_input, current_admin_pw):
-                st.session_state["admin_logged_in"] = True
-                st.success("로그인 성공!")
-                st.rerun()
-            else:
-                st.error("❌ 비밀번호가 올바르지 않습니다.")
+        with st.form("admin_login_form"):
+            admin_pw_input = st.text_input("점주 비밀번호를 입력해 주세요", type="password")
+            submit_login = st.form_submit_button("🔑 로그인", type="primary", use_container_width=True)
+
+            if submit_login:
+                current_admin_pw = get_admin_password()
+                if verify_hash(admin_pw_input, current_admin_pw):
+                    st.session_state["admin_logged_in"] = True
+                    st.success("로그인 성공!")
+                    st.rerun()
+                else:
+                    st.error("❌ 비밀번호가 올바르지 않습니다.")
     else:
         col_side1, col_side2 = st.sidebar.columns([2, 1])
         col_side1.success("🔑 점주 관리자 인증됨")
@@ -1334,7 +1536,7 @@ else:
             )
             if menu_res.data and isinstance(menu_res.data[0]["value"], list):
                 raw_options = menu_res.data[0]["value"]
-                # 2. DB에서 가져온 메뉴명 중 대타 승인 메뉴에 실시간 뱃지 적용
+                # DB에서 가져온 메뉴명 중 대타 승인 메뉴에 실시간 뱃지 적용
                 admin_menu_options = [
                     shift_menu_label if item.startswith("🔄 대타 신청 승인") else item
                     for item in raw_options
@@ -1346,9 +1548,7 @@ else:
 
         admin_menu = st.sidebar.selectbox("점주 관리 메뉴", admin_menu_options)
 
-
-    
-          # =========================================================
+# =========================================================
         # [점주 메뉴 1] 매출 분석 & 손익계산서 (홀 / 배달 플랫폼별 구분)
         # =========================================================
         if admin_menu == "📝 매출 분석 & 손익계산서(P&L)":
@@ -1591,6 +1791,9 @@ else:
                                     "net": d_net,
                                 }
                             )
+                            st.caption(
+                                f"💡 **[{p_sel}] 정산 소계:** 매출 `{d_gross:,}`원 - 수수료 `{p_fee:,}`원 - 라이더비 `{r_fee_tot:,}`원 = **순매출 `{d_net:,}`원**"
+                            )
                             st.divider()
 
                         col_btn1, col_btn2 = st.columns([1, 4])
@@ -1708,14 +1911,14 @@ else:
                     st.dataframe(
                         display_list,
                         column_config={
-                            "총 매출": st.column_config.NumberColumn(format="%d 원"),
-                            "홀 매출 합계": st.column_config.NumberColumn(format="%d 원"),
-                            "현금": st.column_config.NumberColumn(format="%d 원"),
-                            "카드": st.column_config.NumberColumn(format="%d 원"),
-                            "기타": st.column_config.NumberColumn(format="%d 원"),
-                            "리워드/쿠폰": st.column_config.NumberColumn(format="%d 원"),
-                            "배달 순매출 합계": st.column_config.NumberColumn(format="%d 원"),
-                            "배달 건수": st.column_config.NumberColumn(format="%d 건"),
+                            "총 매출": st.column_config.NumberColumn(format="%,d 원"),
+                            "홀 매출 합계": st.column_config.NumberColumn(format="%,d 원"),
+                            "현금": st.column_config.NumberColumn(format="%,d 원"),
+                            "카드": st.column_config.NumberColumn(format="%,d 원"),
+                            "기타": st.column_config.NumberColumn(format="%,d 원"),
+                            "리워드/쿠폰": st.column_config.NumberColumn(format="%,d 원"),
+                            "배달 순매출 합계": st.column_config.NumberColumn(format="%,d 원"),
+                            "배달 건수": st.column_config.NumberColumn(format="%,d 건"),
                         },
                         use_container_width=True,
                         hide_index=True,
@@ -1723,7 +1926,7 @@ else:
                 else:
                     st.info(f"{sales_date.strftime('%Y년 %m월')}에 등록된 매출 내역이 없습니다.")
 
-# =========================================================
+        # =========================================================
         # [점주 메뉴 2] 엠즈푸드 발주 등록 (DB 컬럼명 'day' 기준)
         # =========================================================
         elif admin_menu == "🚚 엠즈푸드 발주등록":
@@ -1868,8 +2071,9 @@ else:
                     else:
                         st.info("해당 월에는 삭제할 발주 내역이 없습니다.")
             else:
-                st.info("💡 등록된 엠즈푸드 발주 내역이 없습니다. 위에서 새로운 발주 내역을 입력해 주세요.")     
-       # =========================================================================
+                st.info("💡 등록된 엠즈푸드 발주 내역이 없습니다. 위에서 새로운 발주 내역을 입력해 주세요.")
+
+# =========================================================================
         # 3. 종합 매출/비용 시각화 분석
         # =========================================================================
         elif admin_menu == "📈 종합 매출/비용 시각화 분석":
@@ -2099,7 +2303,7 @@ else:
 
                     st.write("---")
 
-                    # 3) 상세 요약 데이터프레임
+                    # 3) 상세 요약 데이터프레임 (포맷 수정 완료)
                     st.markdown("#### 📋 월별 매출 / 차감 지출 항목 / 최종 순수익 내역")
                     df_display_summary = df_monthly_summary.copy()
                     df_display_summary["year_month"] = df_display_summary["year_month"].apply(
@@ -2110,13 +2314,13 @@ else:
                         df_display_summary,
                         column_config={
                             "year_month": "연월",
-                            "sales_amount": st.column_config.NumberColumn("① 총 매출액 (+)", format="%d 원"),
-                            "mfood_cost": st.column_config.NumberColumn("발주비 (-)", format="%d 원"),
-                            "waste_cost": st.column_config.NumberColumn("폐기비 (-)", format="%d 원"),
-                            "labor_cost": st.column_config.NumberColumn("인건비 (-)", format="%d 원"),
-                            "other_cost": st.column_config.NumberColumn("기타지출 (-)", format="%d 원"),
-                            "total_cost": st.column_config.NumberColumn("② 총 지출합계 (-)", format="%d 원"),
-                            "net_profit": st.column_config.NumberColumn("③ 최종 순수익 (①-②)", format="%d 원"),
+                            "sales_amount": st.column_config.NumberColumn("① 총 매출액 (+)", format="%,d 원"),
+                            "mfood_cost": st.column_config.NumberColumn("발주비 (-)", format="%,d 원"),
+                            "waste_cost": st.column_config.NumberColumn("폐기비 (-)", format="%,d 원"),
+                            "labor_cost": st.column_config.NumberColumn("인건비 (-)", format="%,d 원"),
+                            "other_cost": st.column_config.NumberColumn("기타지출 (-)", format="%,d 원"),
+                            "total_cost": st.column_config.NumberColumn("② 총 지출합계 (-)", format="%,d 원"),
+                            "net_profit": st.column_config.NumberColumn("③ 최종 순수익 (①-②)", format="%,d 원"),
                             "profit_rate": st.column_config.NumberColumn("순수익률", format="%.1f %%"),
                         },
                         use_container_width=True,
@@ -2286,9 +2490,8 @@ else:
                         st.info("정산할 근무 기록이 없습니다.")
                 except Exception as e:
                     st.warning(f"인건비 계산 중 오류가 발생했습니다: {e}")
-    
 
-        # =========================================================================
+# =========================================================================
         # 4. 지출 및 비용 관리 (독립 메뉴 처리)
         # =========================================================================
         elif "지출" in admin_menu or "비용" in admin_menu:
@@ -2301,13 +2504,15 @@ else:
                 default_exp_items = ["원부자재(원두/시럽 등)", "임대료/공과금", "인건비", "소모품/비품", "수리/유지보수", "마케팅/홍보", "기타"]
                 exp_items = get_setting("expense_categories", default_exp_items)
 
-                with st.form("expense_form", clear_on_submit=True):
-                    col_e1, col_e2 = st.columns(2)
-                    exp_date = col_e1.date_input("지출 날짜", datetime.date.today())
-                    exp_item_selected = col_e2.selectbox("지출 항목", exp_items)
+                # 💡 st.form() 오류 방지를 위해 커스텀 날짜 선택기(button)를 form 외부에 배치
+                exp_date = get_korean_date_picker("📅 지출 날짜", key_prefix="exp_date_picker")
 
-                    col_e3, col_e4 = st.columns(2)
+                with st.form("expense_form", clear_on_submit=True):
+                    col_e2, col_e3 = st.columns(2)
+                    exp_item_selected = col_e2.selectbox("지출 항목", exp_items)
                     exp_amount = col_e3.number_input("지출 금액 (원)", min_value=0, step=1000, value=0)
+
+                    col_e4, _ = st.columns(2)
                     exp_method = col_e4.selectbox("결제 수단", ["카드", "계좌이체", "현금", "기타"])
 
                     exp_memo = st.text_input("비고 / 메모", placeholder="예: OO유통 입금 완료")
@@ -2320,12 +2525,12 @@ else:
                                     "date": str(exp_date),
                                     "category": exp_item_selected,
                                     "item_name": exp_item_selected,
-                                    "amount": exp_amount,
+                                    "amount": int(exp_amount),
                                     "payment_method": exp_method,
                                     "memo": exp_memo.strip(),
                                     "created_at": now_str
                                 }).execute()
-                                st.success(f"✅ [{exp_date}] {exp_item_selected} ({exp_amount:,}원) 지출 내역이 저장되었습니다.")
+                                st.success(f"✅ [{exp_date}] {exp_item_selected} ({int(exp_amount):,}원) 지출 내역이 저장되었습니다.")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ 저장 중 오류 발생: {e}")
@@ -2340,6 +2545,8 @@ else:
 
                     if exp_list:
                         df_exp = pd.DataFrame(exp_list)
+                        # 회계 금액 연산을 위한 정수형 숫자 전처리
+                        df_exp["amount"] = pd.to_numeric(df_exp["amount"], errors="coerce").fillna(0).astype(int)
                         df_exp["year_month"] = df_exp["date"].astype(str).str[:7]
 
                         col_f1, col_f2 = st.columns(2)
@@ -2361,7 +2568,7 @@ else:
                         else:
                             metric_title = "📦 전체 지출 합계"
 
-                        total_exp = df_filtered["amount"].sum() if not df_filtered.empty else 0
+                        total_exp = int(df_filtered["amount"].sum()) if not df_filtered.empty else 0
                         st.metric(metric_title, f"{total_exp:,} 원")
 
                         if not df_filtered.empty:
@@ -2374,21 +2581,27 @@ else:
                                 "memo": "메모"
                             }, inplace=True)
 
-                            df_disp["금액(원)"] = df_disp["금액(원)"].apply(lambda x: f"{x:,}")
                             cols_to_show = ["날짜", "지출항목", "금액(원)", "결제수단", "메모"]
 
-                            st.dataframe(style_date_dataframe(df_disp[cols_to_show], "날짜"), use_container_width=True)
+                            # 회계 수치 데이터 포맷팅 적용 (정렬 기능 유지)
+                            st.dataframe(
+                                style_date_dataframe(df_disp[cols_to_show], "날짜"),
+                                column_config={
+                                    "금액(원)": st.column_config.NumberColumn("금액(원)", format="%,d 원")
+                                },
+                                use_container_width=True,
+                                hide_index=True
+                            )
 
                             st.write("---")
                             st.write("#### 🗑️ 지출 내역 삭제")
                             del_exp_id = st.selectbox(
                                 "삭제할 항목 선택",
                                 df_filtered["id"].tolist(),
-                                format_func=lambda x: f"[{df_filtered[df_filtered['id']==x]['date'].values[0]}] {df_filtered[df_filtered['id']==x]['category'].values[0]} ({df_filtered[df_filtered['id']==x]['amount'].values[0]:,}원)",
+                                format_func=lambda x: f"[{df_filtered[df_filtered['id']==x]['date'].values[0]}] {df_filtered[df_filtered['id']==x]['category'].values[0]} ({int(df_filtered[df_filtered['id']==x]['amount'].values[0]):,}원)",
                                 key="sb_del_exp_id"
                             )
                             if st.button("❌ 선택한 지출 내역 삭제", type="secondary", key="btn_del_exp"):
-                                # 💡 .delete() 위치 수정
                                 supabase.table("expenses").delete().eq("id", del_exp_id).execute()
                                 st.success("지출 내역이 삭제되었습니다.")
                                 st.rerun()
@@ -2398,9 +2611,7 @@ else:
                         st.info("💡 등록된 지출 내역이 없습니다.")
                 except Exception as e:
                     st.warning(f"💡 Supabase 'expenses' 테이블 확인이 필요합니다. ({e})")
-
-
-        # =========================================================================
+ # =========================================================================
         # 5. 대타 신청 승인
         # =========================================================================
         elif admin_menu.startswith("🔄 대타 신청 승인"):
@@ -2467,11 +2678,11 @@ else:
                         "status": "상태",
                     }
                 )
-                st.dataframe(style_date_dataframe(df_all_req, "날짜"), use_container_width=True)
+                st.dataframe(style_date_dataframe(df_all_req, "날짜"), use_container_width=True, hide_index=True)
             else:
                 st.info("전체 대타 교대 이력이 없습니다.")
 
-   # =========================================================================
+        # =========================================================================
         # 6. 직원 인수인계 이력 점검
         # =========================================================================
         elif admin_menu == "🤝 직원 인수인계 이력 점검":
@@ -2511,7 +2722,6 @@ else:
                     }
                 )
 
-                # 💡 날짜 선택만으로 깔끔하게 조회
                 col_date, _ = st.columns([2, 2])
                 selected_date = col_date.date_input("📅 조회할 날짜 선택", datetime.date.today(), key="ho_date_picker")
 
@@ -2544,7 +2754,7 @@ else:
             else:
                 st.info("등록된 인수인계 기록이 없습니다.")
 
-         # =========================================================================
+# =========================================================================
         # 7. 원자재 폐기 이력 & 재고 실사 점검
         # =========================================================================
         elif admin_menu == "🗑️ 원자재 폐기 이력 & 손실 점검":
@@ -2660,8 +2870,6 @@ else:
                 else:
                     st.info("등록된 폐기 내역이 없습니다.")
 
-           
-        
             with tab2:
                 st.markdown("#### 📦 직원 재고 실사 점검 이력")
                 if not inv_log_df.empty:
@@ -2725,7 +2933,7 @@ else:
                 else:
                     st.info("등록된 재고 실사 기록이 없습니다.")
 
-                 # =========================================================================
+        # =========================================================================
         # 8. 오픈/마감 체크리스트 관리
         # =========================================================================
         elif "체크리스트" in admin_menu:
@@ -2857,9 +3065,10 @@ else:
                         st.rerun()
                 else:
                     st.info(f"💡 [{target_shift}] 파트에 등록된 점검 항목이 없습니다. 위에서 새 항목을 추가해 주세요.")
-        # --------------------------------------------------
-        # 점주 메뉴: ⏰ 직원 근무 스케줄 설정 및 관리
-        # --------------------------------------------------
+
+# =========================================================================
+        # 9. 점주 메뉴: ⏰ 직원 근무 스케줄 설정 및 관리
+        # =========================================================================
         elif admin_menu == "⏰ 직원 근무 스케줄 설정 및 관리" or "스케줄" in admin_menu:
             st.subheader("🗓️ 직원 근무 캘린더 & 스케줄 관리")
 
@@ -2903,10 +3112,16 @@ else:
             st.write("---")
             st.caption("💡 달력의 날짜 버튼을 클릭하면 아래 등록 폼의 날짜가 자동으로 설정됩니다.")
             
+            # 💡 요일 헤더 색상 설정 (토요일: 파랑, 일요일: 빨강)
             days_kr = ["월", "화", "수", "목", "금", "토", "일"]
             cols = st.columns(7)
             for idx, day_name in enumerate(days_kr):
-                cols[idx].markdown(f"**{day_name}**")
+                if idx == 5:
+                    cols[idx].markdown(f":blue[**{day_name}**]")
+                elif idx == 6:
+                    cols[idx].markdown(f":red[**{day_name}**]")
+                else:
+                    cols[idx].markdown(f"**{day_name}**")
 
             month_calendar = calendar.monthcalendar(sel_year, sel_month)
 
@@ -2920,12 +3135,13 @@ else:
                         date_str = f"{sel_year}-{sel_month:02d}-{day:02d}"
                         day_schedules = schedule_by_date.get(date_str, [])
 
-                        # 요일별 주말 표시
-                        day_display = f"{day}일"
+                        # 💡 요일별 주말 표시 및 색상 적용 (토요일: 파랑, 일요일: 빨강)
                         if idx == 5:
-                            day_display = f"{day}일(토)"
+                            day_display = f":blue[{day}일(토)]"
                         elif idx == 6:
-                            day_display = f"{day}일(일)"
+                            day_display = f":red[{day}일(일)]"
+                        else:
+                            day_display = f"{day}일"
 
                         # 날짜 카드를 컨테이너로 표시
                         with week_cols[idx].container(border=True):
@@ -3037,7 +3253,7 @@ else:
                             def_start = datetime.time(9, 0)
                             def_end = datetime.time(15, 0)
 
-                        # 2. 수정 입력 폼 (selected_id를 key에 결합하여 셀렉트박스 변경 시 입력창도 동기화)
+                        # 2. 수정 입력 폼
                         with st.form(f"edit_sch_form_{selected_id}"):
                             st.markdown("##### ✏️ 선택한 스케줄 정보 수정")
                             col_e1, col_e2 = st.columns(2)
@@ -3107,9 +3323,8 @@ else:
                                     st.error(f"❌ 삭제 실패: {e}")
                 else:
                     st.info("💡 이번 달 등록된 스케줄이 없습니다.")
-               
 
-        # =========================================================================
+# =========================================================================
         # 9. 재고현황 및 원가 관리
         # =========================================================================
         elif admin_menu == "📦 재고 현황 & 원가 관리" or "재고" in admin_menu:
@@ -3211,16 +3426,16 @@ else:
                         "item_name": "품목명",
                         "unit": "단위",
                         "unit_price": st.column_config.NumberColumn(
-                            "단가", format="%d 원"
+                            "단가", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                         ),
                         "current_qty": st.column_config.NumberColumn(
-                            "현재 수량", format="%.1f"
+                            "현재 수량", format="%,.1f"  # 👈 회계 포맷(콤마) 적용
                         ),
                         "safety_qty": st.column_config.NumberColumn(
-                            "안전 재고", format="%.1f"
+                            "안전 재고", format="%,.1f"  # 👈 회계 포맷(콤마) 적용
                         ),
                         "total_val": st.column_config.NumberColumn(
-                            "재고 평가액", format="%d 원"
+                            "재고 평가액", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                         ),
                     },
                     use_container_width=True,
@@ -3244,7 +3459,7 @@ else:
                     " 품목을 신규 등록해 주시면 이곳에 자동으로 표시됩니다!"
                 )
 
-# 10. 전체 인건비 정산 (점주 모드)
+        # 10. 전체 인건비 정산 (점주 모드)
         elif admin_menu == "💰 전체 인건비 정산":
             st.subheader("💰 월별 전체 인건비 정산")
             st.caption(
@@ -3399,7 +3614,7 @@ else:
                     with col_kpi4:
                         st.metric(
                             "⏱️ 총 근무시간",
-                            f"{payroll_df['total_hours'].sum():.1f} 시간",
+                            f"{payroll_df['total_hours'].sum():,.1f} 시간",  # 👈 근무시간에도 콤마 추가
                         )
 
                     st.write("---")
@@ -3456,28 +3671,28 @@ else:
                             column_config={
                                 "staff_name": "직원명",
                                 "hourly_wage": st.column_config.NumberColumn(
-                                    "시급", format="%d 원"
+                                    "시급", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "work_days": st.column_config.NumberColumn(
-                                    "근무일수", format="%d 일"
+                                    "근무일수", format="%,d 일"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "total_hours": st.column_config.NumberColumn(
-                                    "총시간", format="%.2f 시간"
+                                    "총시간", format="%,.2f 시간"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "base_salary": st.column_config.NumberColumn(
-                                    "기본급", format="%d 원"
+                                    "기본급", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "holiday_pay": st.column_config.NumberColumn(
-                                    "주휴수당", format="%d 원"
+                                    "주휴수당", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "gross_salary": st.column_config.NumberColumn(
-                                    "총 지급액", format="%d 원"
+                                    "총 지급액", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "tax_amount": st.column_config.NumberColumn(
-                                    "세금(3.3%)", format="%d 원"
+                                    "세금(3.3%)", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                                 "net_salary": st.column_config.NumberColumn(
-                                    "💵 실수령액", format="%d 원"
+                                    "💵 실수령액", format="%,d 원"  # 👈 회계 포맷(콤마) 적용
                                 ),
                             },
                             use_container_width=True,
@@ -3508,9 +3723,15 @@ else:
                                 "staff_name": "직원명",
                                 "clock_in": "출근 시각",
                                 "clock_out": "퇴근 시각",
-                                "work_hours": "근무 시간(h)",
-                                "late_minutes": "지각(분)",
-                                "early_leave_minutes": "조퇴(분)",
+                                "work_hours": st.column_config.NumberColumn(
+                                    "근무 시간(h)", format="%,.1f"  # 👈 회계 포맷(콤마) 적용
+                                ),
+                                "late_minutes": st.column_config.NumberColumn(
+                                    "지각(분)", format="%,d"  # 👈 회계 포맷(콤마) 적용
+                                ),
+                                "early_leave_minutes": st.column_config.NumberColumn(
+                                    "조퇴(분)", format="%,d"  # 👈 회계 포맷(콤마) 적용
+                                ),
                             },
                             use_container_width=True,
                             hide_index=True,
@@ -3534,7 +3755,16 @@ else:
             if not df_staff.empty:
                 st.write("#### 📋 등록된 직원 목록")
                 st.dataframe(
-                    df_staff[["name", "role", "hourly_rate"]], use_container_width=True
+                    df_staff[["name", "role", "hourly_rate"]],
+                    column_config={
+                        "name": "직원명",
+                        "role": "직책",
+                        "hourly_rate": st.column_config.NumberColumn(
+                            "시급", format="%,d 원"  # 👈 직원 목록 시급에도 회계 포맷(콤마) 적용
+                        ),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
                 )
 
             # --------------------------------------------------
@@ -3612,8 +3842,9 @@ else:
                         st.error(f"직원 삭제 중 오류가 발생했습니다: {e}")
             else:
                 st.info("현재 등록된 직원이 없습니다.")
-
+#-------------------------------------------------
         # 12. 점주 비밀번호 변경
+#--------------------------------------------------
         elif admin_menu == "🔑 점주 비밀번호 변경":
             st.subheader("🔑 관리자 비밀번호 변경")
 
@@ -3635,7 +3866,8 @@ else:
                         st.success("✅ 점주 비밀번호가 변경되었습니다.")
                         st.rerun()
 
-        # 13. 공지사항 수정
+#-----------------------------------------
+# 13. 공지사항 수정
         elif admin_menu == "📢 공지사항 수정":
             st.subheader("📢 직원 게시판 공지사항 작성/수정")
 
@@ -3797,7 +4029,6 @@ else:
             if st.button("🔥 데이터 초기화 실행", type="primary"):
                 if confirm_input.strip() == "초기화" and confirm_checkbox:
                     try:
-                        # 모든 하위 실사/기록/마스터 테이블 후보군 전체
                         all_tables = [
                             "inventory_log", "inventory_logs", "inventory_check", "inventory_checks",
                             "stock_check", "stock_checks", "inventory_history", "inventory_audit",
@@ -3808,35 +4039,30 @@ else:
 
                         if reset_type.startswith("🚨"):
                             for t in all_tables:
-                                # 1차: id 컬럼 기준 삭제 시도
                                 try:
                                     supabase.table(t).delete().neq("id", -999999).execute()
                                     continue
                                 except Exception:
                                     pass
 
-                                # 2차: date 컬럼 기준 삭제 시도
                                 try:
                                     supabase.table(t).delete().neq("date", "1900-01-01").execute()
                                     continue
                                 except Exception:
                                     pass
 
-                                # 3차: item_name 컬럼 기준 삭제 시도
                                 try:
                                     supabase.table(t).delete().neq("item_name", "__DELETE_ALL__").execute()
                                     continue
                                 except Exception:
                                     pass
 
-                                # 4차: name 컬럼 기준 삭제 시도
                                 try:
                                     supabase.table(t).delete().neq("name", "__DELETE_ALL__").execute()
                                     continue
                                 except Exception:
                                     pass
 
-                                # 5차: year_month 컬럼 기준 삭제 시도
                                 try:
                                     supabase.table(t).delete().neq("year_month", "1900-01").execute()
                                 except Exception:
@@ -3873,21 +4099,21 @@ else:
                 else:
                     st.error("❌ '초기화' 문구 입력과 동의 체크박스를 모두 확인해 주세요.")
 
-# ⚙️ 메뉴 & 항목 설정 관리 (전체 세부 항목 커스텀 + 배달 수수료율 포함)
+        # ⚙️ 메뉴 & 항목 설정 관리 (순수 매장 운영용)
         elif admin_menu == "⚙️ 메뉴 & 항목 설정 관리":
             st.subheader("⚙️ 점주 메뉴 및 세부 항목 커스텀 설정")
-            st.caption("사이드바 메뉴, 배달 플랫폼 수수료, 지출 카테고리, 재고, 폐기 사유 등 모든 항목을 직접 관리하세요.")
+            st.caption("사이드바 메뉴, 배달 수수료율, 지출 카테고리, 재고 품목, 폐기 사유 등을 직접 관리하세요.")
 
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
                 "📌 사이드바 메뉴",
                 "🛵 배달 플랫폼 & 수수료율",
                 "💸 지출 카테고리",
-                "📦 재고 품목",
-                "🗑️ 폐기 사유"
+                "📦 재고 품목 관리",
+                "🗑️ 폐기 사유 관리"
             ])
 
             # --------------------------------------------------
-            # 탭 1: 사이드바 메뉴 순서/이름 수정
+            # 탭 1: 사이드바 메뉴 관리
             # --------------------------------------------------
             with tab1:
                 st.write("#### 📌 점주 사이드바 메뉴 관리")
@@ -3904,22 +4130,20 @@ else:
                     st.rerun()
 
             # --------------------------------------------------
-            # 탭 2: 배달 플랫폼 & 수수료율 관리 (수정 및 추가/삭제 가능)
+            # 탭 2: 배달 플랫폼 & 수수료율 관리
             # --------------------------------------------------
             with tab2:
                 st.write("#### 🛵 배달 플랫폼 및 수수료율 설정")
-                st.caption("표에서 플랫폼명과 수수료율(%)을 입력/수정하세요. 하단의 빈 줄에 클릭하여 새 플랫폼을 추가하거나 삭제할 수도 있습니다.")
+                st.caption("배달 정산 계산 시 적용할 플랫폼별 수수료율(%)을 입력하세요.")
 
                 del_res = supabase.table("app_settings").select("value").eq("key", "delivery_platforms").execute()
 
-                # 기존 DB에 저장된 데이터 가져오기 (없을 경우 기본값 적용)
                 if del_res.data and isinstance(del_res.data[0]["value"], list):
                     raw_data = del_res.data[0]["value"]
-                    # 이전 버전의 단일 문자열 리스트 형태 호환 처리
                     if raw_data and isinstance(raw_data[0], str):
                         init_del_data = [{"플랫폼명": p, "수수료율 (%)": 10.0} for p in raw_data]
                     else:
-                        init_del_data = raw_data
+                        init_del_data = [{"플랫폼명": d.get("플랫폼명", ""), "수수료율 (%)": float(d.get("수수료율 (%)", 0.0))} for d in raw_data if isinstance(d, dict)]
                 else:
                     init_del_data = [
                         {"플랫폼명": "배달의민족", "수수료율 (%)": 6.8},
@@ -3930,10 +4154,9 @@ else:
 
                 df_del_init = pd.DataFrame(init_del_data)
 
-                # 엑셀처럼 직접 수정 및 추가 가능한 데이터 편집기
                 edited_del_df = st.data_editor(
                     df_del_init,
-                    num_rows="dynamic",  # 행 추가/삭제 허용
+                    num_rows="dynamic",
                     use_container_width=True,
                     column_config={
                         "플랫폼명": st.column_config.TextColumn("플랫폼 이름", required=True),
@@ -3947,52 +4170,70 @@ else:
                 if st.button("💾 배달 플랫폼 & 수수료율 저장", type="primary", key="save_del_btn"):
                     save_data = edited_del_df.to_dict(orient="records")
                     supabase.table("app_settings").upsert({"key": "delivery_platforms", "value": save_data}).execute()
-                    st.success("✅ 배달 플랫폼 및 수수료율이 성공적으로 저장되었습니다!")
+                    st.success("✅ 배달 플랫폼 설정이 저장되었습니다!")
                     st.rerun()
 
             # --------------------------------------------------
-            # 탭 3: 지출 / 비용 카테고리 관리
+            # 탭 3: 지출 카테고리 관리
             # --------------------------------------------------
             with tab3:
-                st.write("#### 💸 지출 및 비용 카테고리 설정")
-                st.caption("💡 이곳에서 변경 후 저장하면 [지출 및 비용 관리] 메뉴에 자동으로 반영됩니다.")
+                st.write("#### 💸 지출 카테고리 설정")
+                st.caption("💡 매장에서 지출 등록 시 분류할 카테고리 항목입니다.")
 
-                default_exp = ["임대료", "인건비", "원자재/재료비", "공과금(전기/수도/가스)", "통신/포스비", "기타지출"]
+                default_exp_data = [
+                    {"카테고리명": "임대료"},
+                    {"카테고리명": "인건비"},
+                    {"카테고리명": "원자재/재료비"},
+                    {"카테고리명": "공과금(전기/수도/가스)"},
+                    {"카테고리명": "통신/포스비"},
+                    {"카테고리명": "기타지출"},
+                ]
 
-                # DB에서 현재 설정값 불러오기
-                current_exp = get_setting("expense_categories", default_exp)
+                exp_res = supabase.table("app_settings").select("value").eq("key", "expense_categories").execute()
 
-                edited_exp_text = st.text_area(
-                    "지출 카테고리 목록 (줄바꿈 구분)",
-                    value="\n".join(current_exp),
-                    height=200,
-                    key="exp_tab_area"
+                if exp_res.data and isinstance(exp_res.data[0]["value"], list):
+                    raw_exp = exp_res.data[0]["value"]
+                    if raw_exp and isinstance(raw_exp[0], str):
+                        init_exp_data = [{"카테고리명": cat} for cat in raw_exp]
+                    else:
+                        init_exp_data = [{"카테고리명": e.get("카테고리명", "")} for e in raw_exp if isinstance(e, dict)]
+                else:
+                    init_exp_data = default_exp_data
+
+                df_exp_init = pd.DataFrame(init_exp_data)
+
+                edited_exp_df = st.data_editor(
+                    df_exp_init,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        "카테고리명": st.column_config.TextColumn("지출 카테고리명", required=True),
+                    },
+                    key="exp_tab_editor"
                 )
 
-                if st.button("💾 카테고리 저장 및 즉시 반영", type="primary", key="save_exp_btn", use_container_width=True):
-                    new_exp_list = [e.strip() for e in edited_exp_text.split("\n") if e.strip()]
-
-                    if not new_exp_list:
+                if st.button("💾 지출 카테고리 저장", type="primary", key="save_exp_btn", use_container_width=True):
+                    save_exp_data = edited_exp_df.to_dict(orient="records")
+                    if not save_exp_data:
                         st.warning("⚠️ 최소 1개 이상의 카테고리를 입력해야 합니다.")
                     else:
                         try:
                             supabase.table("app_settings").upsert({
                                 "key": "expense_categories",
-                                "value": new_exp_list
+                                "value": save_exp_data
                             }, on_conflict="key").execute()
 
-                            st.success("✅ 지출 카테고리가 업데이트되었습니다!")
-                            st.rerun()  # 화면을 새로고침하여 전체 메뉴에 변경값 자동 반영
+                            st.success("✅ 지출 카테고리가 저장되었습니다!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"❌ 저장 중 오류 발생: {e}")
 
-     
-               # --------------------------------------------------
-            # 탭 4: 재고 품목 관리 (단가 기준 직접 수정)
+            # --------------------------------------------------
+            # 탭 4: 재고 품목 관리
             # --------------------------------------------------
             with tab4:
                 st.write("#### 📦 재고 관리 품목 설정")
-                st.caption("매장에서 사용하는 재고 품목을 관리합니다. 표에서 '단가' 및 정보를 직접 수정 후 저장할 수 있습니다.")
+                st.caption("매장에서 사용하는 품목, 단가, 안전재고 수량을 설정합니다.")
 
                 # 1. 신규 품목 등록
                 with st.expander("➕ 신규 재고 품목 등록", expanded=False):
@@ -4025,7 +4266,6 @@ else:
                                 st.error("❌ 품목명을 입력해 주세요.")
                             else:
                                 try:
-                                    # DB에 실제로 존재하는 6개 필드만 전송
                                     data = {
                                         "item_name": new_item_name.strip(),
                                         "category": new_category,
@@ -4035,7 +4275,7 @@ else:
                                         "safety_qty": float(new_safety_qty),
                                     }
                                     supabase.table("inventory").insert(data).execute()
-                                    st.success(f"✅ '{new_item_name}' 품목이 성공적으로 등록되었습니다.")
+                                    st.success(f"✅ '{new_item_name}' 품목이 등록되었습니다.")
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"❌ 제출 중 오류가 발생했습니다: {e}")
@@ -4051,17 +4291,17 @@ else:
 
                 if not inv_df.empty:
                     st.write("#### 📋 등록된 재고 품목 목록")
-                    st.caption("💡 수정하려는 셀을 클릭하여 단가나 수량을 변경한 뒤 하단의 저장 버튼을 눌러주세요.")
+                    st.caption("💡 단가 및 수량을 수정 후 하단 저장 버튼을 눌러주세요.")
 
-                    # 불필요한 cost_price 컬럼이 데이터프레임에 있다면 강제 제거
-                    if "cost_price" in inv_df.columns:
-                        inv_df = inv_df.drop(columns=["cost_price"])
+                    # 회계 관련 컬럼 및 불필요 컬럼 제거
+                    cols_to_drop = [c for c in ["cost_price", "account_code", "account_name"] if c in inv_df.columns]
+                    if cols_to_drop:
+                        inv_df = inv_df.drop(columns=cols_to_drop)
 
                     category_options = ["원두/음료", "유제품", "시럽/소스", "디저트/베이커리", "용기/부자재", "기타"]
 
-                    # 화면에 보여줄 컬럼 설정
                     column_config = {
-                        "id": None,  # id 컬럼 화면 숨김
+                        "id": None,
                         "item_name": st.column_config.TextColumn("품목명", required=True),
                         "category": st.column_config.SelectboxColumn("카테고리", options=category_options, required=True),
                         "unit": st.column_config.TextColumn("단위", required=True),
@@ -4085,14 +4325,13 @@ else:
                             try:
                                 records = edited_inv_df.to_dict(orient="records")
                                 for row in records:
-                                    # DB의 실제 존재하는 필드만 명시적으로 구성
                                     payload = {
                                         "item_name": str(row.get("item_name", "")).strip(),
                                         "category": row.get("category"),
                                         "unit": str(row.get("unit", "")).strip(),
                                         "unit_price": int(row.get("unit_price", 0)),
                                         "current_qty": float(row.get("current_qty", 0.0)),
-                                        "safety_qty": float(row.get("safety_qty", 0.0))
+                                        "safety_qty": float(row.get("safety_qty", 0.0)),
                                     }
                                     
                                     if "id" in row and pd.notna(row["id"]):
@@ -4101,7 +4340,7 @@ else:
                                     else:
                                         supabase.table("inventory").upsert(payload, on_conflict="item_name").execute()
 
-                                st.success("✅ 재고 단가 및 정보가 수정되었습니다!")
+                                st.success("✅ 재고 품목 정보가 수정되었습니다!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ 제출 중 오류가 발생했습니다: {e}")
@@ -4119,18 +4358,46 @@ else:
                                 st.error(f"❌ 삭제 실패: {e}")
                 else:
                     st.info("등록된 재고 품목이 없습니다. 상단 폼에서 신규 품목을 등록해 주세요.")
+
             # --------------------------------------------------
-            # 탭 5: 원자재 폐기 사유 및 품목 관리
+            # 탭 5: 원자재 폐기 사유 관리
             # --------------------------------------------------
             with tab5:
-                st.write("#### 🗑️ 원자재 폐기 사유 목록 설정")
-                wst_res = supabase.table("app_settings").select("value").eq("key", "waste_reasons").execute()
-                current_wst = wst_res.data[0]["value"] if wst_res.data else ["유통기한 경과", "제조/조리 실수", "용기/포장 파손", "원두 추출 불량", "기타"]
+                st.write("#### 🗑️ 원자재 폐기 사유 설정")
+                st.caption("재고 폐기 입력 시 선택할 사유 항목들을 직접 관리합니다.")
 
-                edited_wst_text = st.text_area("폐기 사유 목록 (줄바꿈 구분)", value="\n".join(current_wst), height=200, key="wst_tab_area")
+                wst_res = supabase.table("app_settings").select("value").eq("key", "waste_reasons").execute()
+
+                if wst_res.data and isinstance(wst_res.data[0]["value"], list):
+                    raw_wst = wst_res.data[0]["value"]
+                    if raw_wst and isinstance(raw_wst[0], str):
+                        init_wst_data = [{"폐고사유": w} for w in raw_wst]
+                    else:
+                        init_wst_data = [{"폐고사유": w.get("폐고사유", "")} for w in raw_wst if isinstance(w, dict)]
+                else:
+                    init_wst_data = [
+                        {"폐고사유": "유통기한 경과"},
+                        {"폐고사유": "제조/조리 실수"},
+                        {"폐고사유": "용기/포장 파손"},
+                        {"폐고사유": "원두 추출 불량"},
+                        {"폐고사유": "기타"},
+                    ]
+
+                df_wst_init = pd.DataFrame(init_wst_data)
+
+                edited_wst_df = st.data_editor(
+                    df_wst_init,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        "폐고사유": st.column_config.TextColumn("폐기 사유", required=True),
+                    },
+                    key="wst_tab_editor"
+                )
 
                 if st.button("💾 폐기 사유 저장", type="primary", key="save_wst_btn"):
-                    new_wst_list = [w.strip() for w in edited_wst_text.split("\n") if w.strip()]
-                    supabase.table("app_settings").upsert({"key": "waste_reasons", "value": new_wst_list}).execute()
-                    st.success("✅ 폐기 사유 목록이 업데이트되었습니다!")
+                    save_wst_data = edited_wst_df.to_dict(orient="records")
+                    supabase.table("app_settings").upsert({"key": "waste_reasons", "value": save_wst_data}).execute()
+                    st.success("✅ 폐기 사유가 업데이트되었습니다!")
                     st.rerun()
+           
