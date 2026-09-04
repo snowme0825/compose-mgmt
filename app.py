@@ -2682,7 +2682,7 @@ else:
             else:
                 st.info("전체 대타 교대 이력이 없습니다.")
 
-        # =========================================================================
+# =========================================================================
         # 6. 직원 인수인계 이력 점검
         # =========================================================================
         elif admin_menu == "🤝 직원 인수인계 이력 점검":
@@ -2700,9 +2700,10 @@ else:
                 df_ho_admin = pd.DataFrame()
 
             if not df_ho_admin.empty:
-                # 'created_at'에서 일자(YYYY-MM-DD) 추출
+                # 'created_at'에서 일자(YYYY-MM-DD) 및 년월(YYYY-MM) 추출
                 if "created_at" in df_ho_admin.columns:
                     df_ho_admin["일자"] = df_ho_admin["created_at"].astype(str).str[:10]
+                    df_ho_admin["년월"] = df_ho_admin["created_at"].astype(str).str[:7]
 
                 if "is_read" in df_ho_admin.columns:
                     df_ho_admin["상태"] = df_ho_admin["is_read"].apply(
@@ -2722,11 +2723,30 @@ else:
                     }
                 )
 
-                col_date, _ = st.columns([2, 2])
-                selected_date = col_date.date_input("📅 조회할 날짜 선택", datetime.date.today(), key="ho_date_picker")
+                col_m, col_s = st.columns([2, 2])
+                
+                # 년월 목록 생성 (전체 + 최신월부터 내림차순 정렬)
+                available_yms = ["전체"] + sorted(df_ho_admin["년월"].dropna().unique(), reverse=True) if "년월" in df_ho_admin.columns else ["전체"]
+                selected_ym = col_m.selectbox("📅 조회 월 선택", available_yms, key="ho_ym_picker")
 
-                # 선택한 날짜 데이터 필터링
-                df_filtered = df_ho_admin[df_ho_admin["일자"] == str(selected_date)].copy()
+                # 교대유형 선택 옵션
+                shift_options = ["전체", "오픈 → 미들", "미들 → 마감", "마감 → 오픈", "기타"]
+                selected_shift = col_s.selectbox("🔄 교대 유형 선택", shift_options, key="ho_shift_picker")
+
+                # 데이터 필터링 적용
+                df_filtered = df_ho_admin.copy()
+
+                # 1) 월별 필터링
+                if selected_ym != "전체":
+                    df_filtered = df_filtered[df_filtered["년월"] == selected_ym]
+
+                # 2) 교대유형 필터링
+                if selected_shift != "전체":
+                    if selected_shift == "기타":
+                        main_shifts = ["오픈->미들", "미들->마감", "마감->오픈"]
+                        df_filtered = df_filtered[~df_filtered["교대유형"].isin(main_shifts)]
+                    else:
+                        df_filtered = df_filtered[df_filtered["교대유형"] == selected_shift]
 
                 # 컬럼 순서 정리
                 desired_cols = ["번호", "일자", "인계자", "인수자", "교대유형", "인수인계내용", "작성시각", "상태"]
@@ -2738,10 +2758,11 @@ else:
                 with col_ho_a2:
                     if not df_filtered.empty:
                         csv_data = convert_df_to_csv(df_filtered) if 'convert_df_to_csv' in globals() else df_filtered.to_csv(index=False).encode('utf-8-sig')
+                        file_label = f"compose_handover_{selected_ym if selected_ym != '전체' else 'all'}.csv"
                         st.download_button(
-                            label="📥 선택 일자 기록 CSV 다운로드",
+                            label="📥 선택 기록 CSV 다운로드",
                             data=csv_data,
-                            file_name=f"compose_handover_{selected_date}.csv",
+                            file_name=file_label,
                             mime="text/csv",
                             key="btn_download_handover"
                         )
@@ -2750,7 +2771,7 @@ else:
                 if not df_filtered.empty:
                     st.dataframe(df_filtered, use_container_width=True, hide_index=True)
                 else:
-                    st.info(f"💡 [{selected_date}] 선택한 일자의 인수인계 기록이 없습니다.")
+                    st.info("💡 선택한 조건에 해당하는 인수인계 기록이 없습니다.")
             else:
                 st.info("등록된 인수인계 기록이 없습니다.")
 
@@ -3743,128 +3764,7 @@ else:
             else:
                 st.info("출퇴근 기록(attendance) 데이터가 존재하지 않습니다.")
 
-        # 11. 직원 PIN & 시급 관리
-        elif admin_menu == "👥 직원 PIN & 시급 관리":
-            st.subheader("👥 직원 계정 등록 & 시급/PIN 관리")
-
-            res_staff = supabase.table("staff").select("*").execute()
-            df_staff = (
-                pd.DataFrame(res_staff.data) if res_staff.data else pd.DataFrame()
-            )
-
-            if not df_staff.empty:
-                st.write("#### 📋 등록된 직원 목록")
-                st.dataframe(
-                    df_staff[["name", "role", "hourly_rate"]],
-                    column_config={
-                        "name": "직원명",
-                        "role": "직책",
-                        "hourly_rate": st.column_config.NumberColumn(
-                            "시급", format="%,d 원"  # 👈 직원 목록 시급에도 회계 포맷(콤마) 적용
-                        ),
-                    },
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            # --------------------------------------------------
-            # 1️⃣ 신규 직원 등록
-            # --------------------------------------------------
-            with st.expander("➕ 신규 직원 등록", expanded=False):
-                with st.form("add_staff_form"):
-                    new_name = st.text_input("직원 이름")
-                    new_role = st.selectbox("직책", ["알바", "매니저", "팀장"])
-                    new_rate = st.number_input("시급 (원)", value=10030, step=100)
-                    new_pin = st.text_input(
-                        "접속 PIN 번호 (4자리)", type="password", max_chars=4
-                    )
-
-                    if st.form_submit_button("➕ 직원 등록 저장", type="primary"):
-                        if new_name and new_pin:
-                            supabase.table("staff").insert({
-                                "name": new_name,
-                                "role": new_role,
-                                "hourly_rate": new_rate,
-                                "pin": hash_str(new_pin),
-                            }).execute()
-                            st.success(f"✅ {new_name} 직원이 신규 등록되었습니다.")
-                            st.rerun()
-                        else:
-                            st.warning("직원 이름과 PIN 번호를 입력해 주세요.")
-
-            # --------------------------------------------------
-            # 2️⃣ 직원 PIN 재설정 & 시급 수정
-            # --------------------------------------------------
-            st.divider()
-            st.subheader("🔑 직원 PIN 재설정 및 정보 수정")
-
-            staff_list = df_staff["name"].tolist() if not df_staff.empty else []
-
-            if staff_list:
-                selected_edit_staff = st.selectbox("수정할 직원을 선택하세요", staff_list, key="edit_staff_select")
-
-                # 선택된 직원의 기존 시급 정보 가져오기
-                current_rate = int(df_staff[df_staff["name"] == selected_edit_staff]["hourly_rate"].values[0]) if not df_staff.empty else 10030
-
-                with st.form("edit_staff_form"):
-                    edit_rate = st.number_input("변경할 시급 (원)", value=current_rate, step=100)
-                    edit_pin = st.text_input("새 PIN 번호 (4자리 입력 시에만 변경됨)", type="password", max_chars=4)
-
-                    if st.form_submit_button("💾 정보 수정 저장", type="primary"):
-                        try:
-                            update_data = {"hourly_rate": edit_rate}
-                            # PIN 번호를 입력했을 때만 암호화하여 업데이트
-                            if edit_pin:
-                                update_data["pin"] = hash_str(edit_pin)
-
-                            supabase.table("staff").update(update_data).eq("name", selected_edit_staff).execute()
-                            st.success(f"✅ '{selected_edit_staff}' 직원의 정보가 수정되었습니다.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"수정 중 오류가 발생했습니다: {e}")
-
-            # --------------------------------------------------
-            # 3️⃣ 직원 삭제 기능
-            # --------------------------------------------------
-            st.divider()
-            st.subheader("🗑️ 직원 삭제")
-
-            if staff_list:
-                selected_delete_staff = st.selectbox("삭제할 직원을 선택하세요", staff_list, key="delete_staff_select")
-                confirm_delete = st.checkbox(f"정말로 '{selected_delete_staff}' 직원을 삭제하시겠습니까?")
-
-                if st.button("❌ 직원 정보 삭제", type="primary", disabled=not confirm_delete):
-                    try:
-                        supabase.table("staff").delete().eq("name", selected_delete_staff).execute()
-                        st.success(f"'{selected_delete_staff}' 직원이 성공적으로 삭제되었습니다.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"직원 삭제 중 오류가 발생했습니다: {e}")
-            else:
-                st.info("현재 등록된 직원이 없습니다.")
-#-------------------------------------------------
-        # 12. 점주 비밀번호 변경
-#--------------------------------------------------
-        elif admin_menu == "🔑 점주 비밀번호 변경":
-            st.subheader("🔑 관리자 비밀번호 변경")
-
-            with st.form("change_admin_pw_form"):
-                curr_pw = st.text_input("현재 비밀번호", type="password")
-                new_pw = st.text_input("새 비밀번호", type="password")
-                confirm_pw = st.text_input("새 비밀번호 확인", type="password")
-
-                if st.form_submit_button("🔑 비밀번호 변경 완료", type="primary"):
-                    real_curr_pw = get_admin_password()
-                    if not verify_hash(curr_pw, real_curr_pw):
-                        st.error("❌ 현재 비밀번호가 일치하지 않습니다.")
-                    elif new_pw != confirm_pw:
-                        st.error("❌ 새 비밀번호가 서로 일치하지 않습니다.")
-                    elif len(new_pw) < 4:
-                        st.warning("⚠️ 비밀번호는 최소 4자리 이상이어야 합니다.")
-                    else:
-                        set_admin_password(new_pw)
-                        st.success("✅ 점주 비밀번호가 변경되었습니다.")
-                        st.rerun()
+ 
 
 #-----------------------------------------
 # 13. 공지사항 수정
@@ -3991,7 +3891,7 @@ else:
                         except Exception as e:
                             st.error(f"❌ 복원 처리 중 오류가 발생했습니다: {e}")
 
-        # 15. 데이터 초기화
+ # 15. 데이터 초기화
         elif admin_menu == "⚠️ 데이터 초기화":
             st.subheader("⚠️ 시스템 데이터 초기화")
             st.warning(
@@ -4029,6 +3929,34 @@ else:
             if st.button("🔥 데이터 초기화 실행", type="primary"):
                 if confirm_input.strip() == "초기화" and confirm_checkbox:
                     try:
+                        # 💡 테이블 삭제 및 ID 연번(시퀀스)을 1번부터 다시 시작하도록 리셋하는 내부 함수
+                        def reset_table(table_name):
+                            try:
+                                # 1. Supabase RPC 함수 호출 (TRUNCATE ... RESTART IDENTITY)
+                                supabase.rpc("reset_table_data", {"target_table": table_name}).execute()
+                            except Exception:
+                                # 2. 만약 RPC가 없는 경우 대비한 Fallback (일반 delete)
+                                try:
+                                    supabase.table(table_name).delete().neq("id", -999999).execute()
+                                except Exception:
+                                    pass
+                                try:
+                                    supabase.table(table_name).delete().neq("date", "1900-01-01").execute()
+                                except Exception:
+                                    pass
+                                try:
+                                    supabase.table(table_name).delete().neq("item_name", "__DELETE_ALL__").execute()
+                                except Exception:
+                                    pass
+                                try:
+                                    supabase.table(table_name).delete().neq("name", "__DELETE_ALL__").execute()
+                                except Exception:
+                                    pass
+                                try:
+                                    supabase.table(table_name).delete().neq("year_month", "1900-01").execute()
+                                except Exception:
+                                    pass
+
                         all_tables = [
                             "inventory_log", "inventory_logs", "inventory_check", "inventory_checks",
                             "stock_check", "stock_checks", "inventory_history", "inventory_audit",
@@ -4039,59 +3967,27 @@ else:
 
                         if reset_type.startswith("🚨"):
                             for t in all_tables:
-                                try:
-                                    supabase.table(t).delete().neq("id", -999999).execute()
-                                    continue
-                                except Exception:
-                                    pass
-
-                                try:
-                                    supabase.table(t).delete().neq("date", "1900-01-01").execute()
-                                    continue
-                                except Exception:
-                                    pass
-
-                                try:
-                                    supabase.table(t).delete().neq("item_name", "__DELETE_ALL__").execute()
-                                    continue
-                                except Exception:
-                                    pass
-
-                                try:
-                                    supabase.table(t).delete().neq("name", "__DELETE_ALL__").execute()
-                                    continue
-                                except Exception:
-                                    pass
-
-                                try:
-                                    supabase.table(t).delete().neq("year_month", "1900-01").execute()
-                                except Exception:
-                                    pass
+                                reset_table(t)
 
                         elif reset_type.startswith("📊"):
-                            supabase.table("daily_sales").delete().neq("date", "1900-01-01").execute()
-                            supabase.table("mfood_orders").delete().neq("year_month", "1900-01").execute()
+                            for t in ["daily_sales", "mfood_orders"]:
+                                reset_table(t)
 
                         elif reset_type.startswith("⏰"):
-                            supabase.table("shift_requests").delete().neq("id", -999999).execute()
-                            supabase.table("attendance").delete().neq("id", -999999).execute()
-                            supabase.table("schedule").delete().neq("date", "1900-01-01").execute()
+                            for t in ["shift_requests", "attendance", "schedule"]:
+                                reset_table(t)
 
                         elif reset_type.startswith("🤝"):
-                            supabase.table("handover").delete().neq("id", -999999).execute()
+                            reset_table("handover")
 
                         elif reset_type.startswith("📦"):
-                            for t in ["inventory_log", "inventory_logs", "inventory_check", "inventory_checks", "stock_check", "stock_checks", "inventory_history", "inventory_audit", "waste"]:
-                                try:
-                                    supabase.table(t).delete().neq("id", -999999).execute()
-                                except Exception:
-                                    pass
-                            supabase.table("inventory").delete().neq("item_name", "__DELETE_ALL__").execute()
+                            for t in ["inventory_log", "inventory_logs", "inventory_check", "inventory_checks", "stock_check", "stock_checks", "inventory_history", "inventory_audit", "waste", "inventory"]:
+                                reset_table(t)
 
                         elif reset_type.startswith("📋"):
-                            supabase.table("checklist_log").delete().neq("id", -999999).execute()
+                            reset_table("checklist_log")
 
-                        st.success("✅ 시스템 내 모든 데이터가 완전히 초기화되었습니다.")
+                        st.success("✅ 선택한 데이터 및 ID 연번이 1번부터 시작하도록 완전히 초기화되었습니다.")
                         st.rerun()
 
                     except Exception as e:
@@ -4099,17 +3995,21 @@ else:
                 else:
                     st.error("❌ '초기화' 문구 입력과 동의 체크박스를 모두 확인해 주세요.")
 
-        # ⚙️ 메뉴 & 항목 설정 관리 (순수 매장 운영용)
+# =========================================================================
+        # ⚙️ 메뉴 & 항목 설정 관리 (직원 관리 및 보안 설정 통합)
+        # =========================================================================
         elif admin_menu == "⚙️ 메뉴 & 항목 설정 관리":
             st.subheader("⚙️ 점주 메뉴 및 세부 항목 커스텀 설정")
-            st.caption("사이드바 메뉴, 배달 수수료율, 지출 카테고리, 재고 품목, 폐기 사유 등을 직접 관리하세요.")
+            st.caption("사이드바 메뉴, 배달 수수료율, 지출 카테고리, 재고 품목, 폐기 사유, 직원 관리 및 보안 설정을 한 곳에서 관리하세요.")
 
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
                 "📌 사이드바 메뉴",
                 "🛵 배달 플랫폼 & 수수료율",
                 "💸 지출 카테고리",
                 "📦 재고 품목 관리",
-                "🗑️ 폐기 사유 관리"
+                "🗑️ 폐기 사유 관리",
+                "👥 직원 PIN & 시급 관리",
+                "🔑 점주 비밀번호 변경"
             ])
 
             # --------------------------------------------------
@@ -4117,17 +4017,30 @@ else:
             # --------------------------------------------------
             with tab1:
                 st.write("#### 📌 점주 사이드바 메뉴 관리")
-                current_menus_str = "\n".join(admin_menu_options)
-                edited_menus_text = st.text_area("메뉴 항목 (줄바꿈 구분)", value=current_menus_str, height=220, key="menu_tab_area")
+                st.caption("사이드바에 표시할 메뉴를 줄바꿈으로 구분하여 입력하세요.")
 
-                if st.button("💾 메뉴 구성 저장", type="primary", key="save_menu_btn"):
+                current_menus_str = "\n".join(admin_menu_options)
+                edited_menus_text = st.text_area(
+                    "메뉴 항목 (줄바꿈 구분)",
+                    value=current_menus_str,
+                    height=220,
+                    key="menu_tab_area"
+                )
+
+                if st.button("💾 메뉴 구성 저장", type="primary", key="save_menu_btn", use_container_width=True):
                     new_menu_list = [m.strip() for m in edited_menus_text.split("\n") if m.strip()]
                     if "⚙️ 메뉴 & 항목 설정 관리" not in new_menu_list:
                         new_menu_list.append("⚙️ 메뉴 & 항목 설정 관리")
 
-                    supabase.table("app_settings").upsert({"key": "admin_menus", "value": new_menu_list}).execute()
-                    st.success("✅ 사이드바 메뉴 구성이 변경되었습니다!")
-                    st.rerun()
+                    try:
+                        supabase.table("app_settings").upsert(
+                            {"key": "admin_menus", "value": new_menu_list},
+                            on_conflict="key"
+                        ).execute()
+                        st.success("✅ 사이드바 메뉴 구성이 변경되었습니다!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 저장 중 오류 발생: {e}")
 
             # --------------------------------------------------
             # 탭 2: 배달 플랫폼 & 수수료율 관리
@@ -4143,7 +4056,13 @@ else:
                     if raw_data and isinstance(raw_data[0], str):
                         init_del_data = [{"플랫폼명": p, "수수료율 (%)": 10.0} for p in raw_data]
                     else:
-                        init_del_data = [{"플랫폼명": d.get("플랫폼명", ""), "수수료율 (%)": float(d.get("수수료율 (%)", 0.0))} for d in raw_data if isinstance(d, dict)]
+                        init_del_data = [
+                            {
+                                "플랫폼명": d.get("플랫폼명", ""),
+                                "수수료율 (%)": float(d.get("수수료율 (%)", 0.0))
+                            }
+                            for d in raw_data if isinstance(d, dict)
+                        ]
                 else:
                     init_del_data = [
                         {"플랫폼명": "배달의민족", "수수료율 (%)": 6.8},
@@ -4167,11 +4086,17 @@ else:
                     key="del_platform_editor"
                 )
 
-                if st.button("💾 배달 플랫폼 & 수수료율 저장", type="primary", key="save_del_btn"):
+                if st.button("💾 배달 플랫폼 & 수수료율 저장", type="primary", key="save_del_btn", use_container_width=True):
                     save_data = edited_del_df.to_dict(orient="records")
-                    supabase.table("app_settings").upsert({"key": "delivery_platforms", "value": save_data}).execute()
-                    st.success("✅ 배달 플랫폼 설정이 저장되었습니다!")
-                    st.rerun()
+                    try:
+                        supabase.table("app_settings").upsert(
+                            {"key": "delivery_platforms", "value": save_data},
+                            on_conflict="key"
+                        ).execute()
+                        st.success("✅ 배달 플랫폼 설정이 저장되었습니다!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 저장 중 오류 발생: {e}")
 
             # --------------------------------------------------
             # 탭 3: 지출 카테고리 관리
@@ -4280,9 +4205,9 @@ else:
                                 except Exception as e:
                                     st.error(f"❌ 제출 중 오류가 발생했습니다: {e}")
 
-                st.write("---")
+                st.divider()
 
-                # 2. 등록된 품목 목록
+                # 2. 등록된 품목 목록 및 수정/삭제
                 try:
                     inv_res = supabase.table("inventory").select("*").execute()
                     inv_df = pd.DataFrame(inv_res.data) if inv_res.data else pd.DataFrame()
@@ -4290,10 +4215,9 @@ else:
                     inv_df = pd.DataFrame()
 
                 if not inv_df.empty:
-                    st.write("#### 📋 등록된 재고 품목 목록")
+                    st.write("##### 📋 등록된 재고 품목 목록")
                     st.caption("💡 단가 및 수량을 수정 후 하단 저장 버튼을 눌러주세요.")
 
-                    # 회계 관련 컬럼 및 불필요 컬럼 제거
                     cols_to_drop = [c for c in ["cost_price", "account_code", "account_name"] if c in inv_df.columns]
                     if cols_to_drop:
                         inv_df = inv_df.drop(columns=cols_to_drop)
@@ -4333,7 +4257,7 @@ else:
                                         "current_qty": float(row.get("current_qty", 0.0)),
                                         "safety_qty": float(row.get("safety_qty", 0.0)),
                                     }
-                                    
+
                                     if "id" in row and pd.notna(row["id"]):
                                         payload["id"] = row["id"]
                                         supabase.table("inventory").upsert(payload).execute()
@@ -4346,10 +4270,15 @@ else:
                                 st.error(f"❌ 제출 중 오류가 발생했습니다: {e}")
 
                     with col_del_sel:
-                        del_target = st.selectbox("삭제할 품목 선택", options=inv_df["item_name"].tolist(), key="del_inv_select", label_visibility="collapsed")
+                        del_target = st.selectbox(
+                            "삭제할 품목 선택",
+                            options=inv_df["item_name"].tolist(),
+                            key="del_inv_select",
+                            label_visibility="collapsed"
+                        )
 
                     with col_del_btn:
-                        if st.button("🗑️ 품목 삭제", use_container_width=True, key="del_inv_btn"):
+                        if st.button("🗑️ 품목 삭제", type="secondary", use_container_width=True, key="del_inv_btn"):
                             try:
                                 supabase.table("inventory").delete().eq("item_name", del_target).execute()
                                 st.success(f"✅ '{del_target}' 삭제 완료")
@@ -4371,16 +4300,19 @@ else:
                 if wst_res.data and isinstance(wst_res.data[0]["value"], list):
                     raw_wst = wst_res.data[0]["value"]
                     if raw_wst and isinstance(raw_wst[0], str):
-                        init_wst_data = [{"폐고사유": w} for w in raw_wst]
+                        init_wst_data = [{"폐기사유": w} for w in raw_wst]
                     else:
-                        init_wst_data = [{"폐고사유": w.get("폐고사유", "")} for w in raw_wst if isinstance(w, dict)]
+                        init_wst_data = [
+                            {"폐기사유": w.get("폐기사유", w.get("폐고사유", ""))}
+                            for w in raw_wst if isinstance(w, dict)
+                        ]
                 else:
                     init_wst_data = [
-                        {"폐고사유": "유통기한 경과"},
-                        {"폐고사유": "제조/조리 실수"},
-                        {"폐고사유": "용기/포장 파손"},
-                        {"폐고사유": "원두 추출 불량"},
-                        {"폐고사유": "기타"},
+                        {"폐기사유": "유통기한 경과"},
+                        {"폐기사유": "제조/조리 실수"},
+                        {"폐기사유": "용기/포장 파손"},
+                        {"폐기사유": "원두 추출 불량"},
+                        {"폐기사유": "기타"},
                     ]
 
                 df_wst_init = pd.DataFrame(init_wst_data)
@@ -4390,14 +4322,136 @@ else:
                     num_rows="dynamic",
                     use_container_width=True,
                     column_config={
-                        "폐고사유": st.column_config.TextColumn("폐기 사유", required=True),
+                        "폐기사유": st.column_config.TextColumn("폐기 사유", required=True),
                     },
                     key="wst_tab_editor"
                 )
 
-                if st.button("💾 폐기 사유 저장", type="primary", key="save_wst_btn"):
+                if st.button("💾 폐기 사유 저장", type="primary", key="save_wst_btn", use_container_width=True):
                     save_wst_data = edited_wst_df.to_dict(orient="records")
-                    supabase.table("app_settings").upsert({"key": "waste_reasons", "value": save_wst_data}).execute()
-                    st.success("✅ 폐기 사유가 업데이트되었습니다!")
-                    st.rerun()
-           
+                    try:
+                        supabase.table("app_settings").upsert(
+                            {"key": "waste_reasons", "value": save_wst_data},
+                            on_conflict="key"
+                        ).execute()
+                        st.success("✅ 폐기 사유가 업데이트되었습니다!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 저장 중 오류 발생: {e}")
+
+            # --------------------------------------------------
+            # 탭 6: 직원 PIN & 시급 관리
+            # --------------------------------------------------
+            with tab6:
+                st.write("#### 👥 직원 계정 등록 & 시급/PIN 관리")
+
+                res_staff = supabase.table("staff").select("*").execute()
+                df_staff = pd.DataFrame(res_staff.data) if res_staff.data else pd.DataFrame()
+
+                if not df_staff.empty:
+                    st.write("##### 📋 등록된 직원 목록")
+                    st.dataframe(
+                        df_staff[["name", "role", "hourly_rate"]],
+                        column_config={
+                            "name": "직원명",
+                            "role": "직책",
+                            "hourly_rate": st.column_config.NumberColumn("시급", format="%,d 원"),
+                        },
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                # 1️⃣ 신규 직원 등록
+                with st.expander("➕ 신규 직원 등록", expanded=False):
+                    with st.form("add_staff_form"):
+                        new_name = st.text_input("직원 이름")
+                        new_role = st.selectbox("직책", ["알바", "매니저", "팀장"])
+                        new_rate = st.number_input("시급 (원)", value=10030, step=100)
+                        new_pin = st.text_input("접속 PIN 번호 (4자리)", type="password", max_chars=4)
+
+                        if st.form_submit_button("➕ 직원 등록 저장", type="primary", use_container_width=True):
+                            if new_name and new_pin:
+                                supabase.table("staff").insert({
+                                    "name": new_name,
+                                    "role": new_role,
+                                    "hourly_rate": new_rate,
+                                    "pin": hash_str(new_pin),
+                                }).execute()
+                                st.success(f"✅ {new_name} 직원이 신규 등록되었습니다.")
+                                st.rerun()
+                            else:
+                                st.warning("직원 이름과 PIN 번호를 입력해 주세요.")
+
+                # 2️⃣ 직원 PIN 재설정 & 시급 수정
+                st.divider()
+                st.write("##### 🔑 직원 PIN 재설정 및 정보 수정")
+
+                staff_list = df_staff["name"].tolist() if not df_staff.empty else []
+
+                if staff_list:
+                    selected_edit_staff = st.selectbox("수정할 직원을 선택하세요", staff_list, key="edit_staff_select")
+
+                    current_rate = (
+                        int(df_staff[df_staff["name"] == selected_edit_staff]["hourly_rate"].values[0])
+                        if not df_staff.empty
+                        else 10030
+                    )
+
+                    with st.form("edit_staff_form"):
+                        edit_rate = st.number_input("변경할 시급 (원)", value=current_rate, step=100)
+                        edit_pin = st.text_input("새 PIN 번호 (4자리 입력 시에만 변경됨)", type="password", max_chars=4)
+
+                        if st.form_submit_button("💾 정보 수정 저장", type="primary", use_container_width=True):
+                            try:
+                                update_data = {"hourly_rate": edit_rate}
+                                if edit_pin:
+                                    update_data["pin"] = hash_str(edit_pin)
+
+                                supabase.table("staff").update(update_data).eq("name", selected_edit_staff).execute()
+                                st.success(f"✅ '{selected_edit_staff}' 직원의 정보가 수정되었습니다.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"수정 중 오류가 발생했습니다: {e}")
+
+                # 3️⃣ 직원 삭제 기능
+                st.divider()
+                st.write("##### 🗑️ 직원 삭제")
+
+                if staff_list:
+                    selected_delete_staff = st.selectbox("삭제할 직원을 선택하세요", staff_list, key="delete_staff_select")
+                    confirm_delete = st.checkbox(f"정말로 '{selected_delete_staff}' 직원을 삭제하시겠습니까?")
+
+                    if st.button("❌ 직원 정보 삭제", type="primary", disabled=not confirm_delete, use_container_width=True):
+                        try:
+                            supabase.table("staff").delete().eq("name", selected_delete_staff).execute()
+                            st.success(f"'{selected_delete_staff}' 직원이 성공적으로 삭제되었습니다.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"직원 삭제 중 오류가 발생했습니다: {e}")
+                else:
+                    st.info("현재 등록된 직원이 없습니다.")
+
+            # --------------------------------------------------
+            # 탭 7: 점주 비밀번호 변경
+            # --------------------------------------------------
+            with tab7:
+                st.write("#### 🔑 관리자 비밀번호 변경")
+                st.caption("점주 계정의 접속 비밀번호를 안전하게 변경합니다.")
+
+                with st.form("change_admin_pw_form"):
+                    curr_pw = st.text_input("현재 비밀번호", type="password")
+                    new_pw = st.text_input("새 비밀번호", type="password")
+                    confirm_pw = st.text_input("새 비밀번호 확인", type="password")
+
+                    if st.form_submit_button("🔑 비밀번호 변경 완료", type="primary", use_container_width=True):
+                        real_curr_pw = get_admin_password()
+                        if not verify_hash(curr_pw, real_curr_pw):
+                            st.error("❌ 현재 비밀번호가 일치하지 않습니다.")
+                        elif new_pw != confirm_pw:
+                            st.error("❌ 새 비밀번호가 서로 일치하지 않습니다.")
+                        elif len(new_pw) < 4:
+                            st.warning("⚠️ 비밀번호는 최소 4자리 이상이어야 합니다.")
+                        else:
+                            set_admin_password(new_pw)
+                            st.success("✅ 점주 비밀번호가 변경되었습니다.")
+                            st.rerun()
